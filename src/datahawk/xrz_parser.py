@@ -196,11 +196,12 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         lat_ch.samples.append((ts_sec, lat))
         lon_ch.samples.append((ts_sec, lon))
 
-        # Speed from velocity components (cm/s)
+        # Speed from 3D velocity components (cm/s)
         vn = struct.unpack_from("<i", dec, bs + 32)[0]
         ve = struct.unpack_from("<i", dec, bs + 36)[0]
+        vd = struct.unpack_from("<i", dec, bs + 40)[0]
         if abs(vn) < 50000 and abs(ve) < 50000:
-            speed_kmh = math.sqrt(vn**2 + ve**2) * 3.6 / 100
+            speed_kmh = math.sqrt(vn**2 + ve**2 + vd**2) * 3.6 / 100
             speed_ch.samples.append((ts_sec, speed_kmh))
 
     if lat_ch.samples:
