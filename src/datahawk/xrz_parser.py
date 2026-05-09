@@ -114,13 +114,10 @@ def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
     pos = 0
     end = len(dec)
     while pos < end - 10:
-        # Find next frame marker
         idx = dec.find(b"\x28\x53", pos)
         if idx == -1:
             break
 
-        # Determine frame size: 11 bytes (2B value) or 13 bytes (4B value)
-        # Frame: (S(2) + ts(4) + ch(2) + val(2 or 4) + )(1)
         if idx + 10 < end and dec[idx + 10] == 0x29:
             frame_len = 11
             val_size = 2
@@ -156,6 +153,60 @@ def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
         pos = idx + frame_len
 
 
+_GPS_LAT_ID = -1  # synthetic channel IDs for GPS
+_GPS_LON_ID = -2
+_GPS_SPEED_ID = -3
+
+
+def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
+    """Parse GPS blocks and add lat/lon/speed as synthetic channels."""
+    lat_ch = Channel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
+    lon_ch = Channel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
+    speed_ch = Channel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
+
+    pos = 0
+    prev_lat = prev_lon = prev_ts = None
+    while True:
+        idx = dec.find(b"<hGPS\x00", pos)
+        if idx == -1:
+            break
+        body_len = struct.unpack_from("<I", dec, idx + 5)[0]
+        body = dec[idx + 12: idx + 12 + min(body_len, 56)]
+        pos = idx + 12 + body_len
+
+        if len(body) < 28:
+            continue
+
+        ts_sec = struct.unpack_from("<I", body, 0)[0] / 1000.0
+        lat = struct.unpack_from("<i", body, 4)[0] * 180.0 / (2**31)
+        lon = struct.unpack_from("<i", body, 20)[0] / 2905385.0
+
+        if abs(lat) < 1.0 or abs(lon) < 1.0:
+            continue  # no fix
+
+        lat_ch.samples.append((ts_sec, lat))
+        lon_ch.samples.append((ts_sec, lon))
+
+        # Compute speed from position deltas
+        if prev_lat is not None and ts_sec > prev_ts:
+            import math
+            dt = ts_sec - prev_ts
+            dlat = math.radians(lat - prev_lat)
+            dlon = math.radians(lon - prev_lon) * math.cos(math.radians(lat))
+            dist = math.sqrt(dlat**2 + dlon**2) * 6371000
+            speed_kmh = dist / dt * 3.6
+            if speed_kmh < 200:  # filter GPS jumps
+                speed_ch.samples.append((ts_sec, speed_kmh))
+
+        prev_lat, prev_lon, prev_ts = lat, lon, ts_sec
+
+    if lat_ch.samples:
+        channels[_GPS_LAT_ID] = lat_ch
+        channels[_GPS_LON_ID] = lon_ch
+    if speed_ch.samples:
+        channels[_GPS_SPEED_ID] = speed_ch
+
+
 def parse_xrz(path: Union[Path, str]) -> ParsedSession:
     """Parse an XRZ file and return structured telemetry data."""
     raw = Path(path).read_bytes()
@@ -164,5 +215,6 @@ def parse_xrz(path: Union[Path, str]) -> ParsedSession:
     channels = _parse_channels(dec)
     metadata = _parse_metadata(dec)
     _parse_frames(dec, channels)
+    _parse_gps_blocks(dec, channels)
 
     return ParsedSession(metadata=metadata, channels=channels)
