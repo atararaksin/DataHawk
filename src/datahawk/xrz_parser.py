@@ -170,17 +170,18 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
     # offset 0: timestamp (ms, session-local)
     # offset 20: longitude (raw / 2905385 = degrees)
     # offset 24: latitude (raw / 9768000 = degrees)
+    # offset 32: velocity N component (cm/s, signed)
+    # offset 36: velocity E component (cm/s, signed)
     LON_FACTOR = 2905385.0
     LAT_FACTOR = 9768000.0
 
-    prev_lat = prev_lon = prev_ts = None
     pos = 0
     while True:
         idx = dec.find(b"<hGPS\x00", pos)
         if idx == -1:
             break
         bs = idx + 12
-        if bs + 28 > len(dec):
+        if bs + 40 > len(dec):
             break
 
         ts_sec = struct.unpack_from("<I", dec, bs)[0] / 1000.0
@@ -195,16 +196,12 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         lat_ch.samples.append((ts_sec, lat))
         lon_ch.samples.append((ts_sec, lon))
 
-        if prev_lat is not None and ts_sec > prev_ts:
-            dt = ts_sec - prev_ts
-            dlat = math.radians(lat - prev_lat)
-            dlon = math.radians(lon - prev_lon) * math.cos(math.radians(lat))
-            dist = math.sqrt(dlat**2 + dlon**2) * 6371000
-            speed_kmh = dist / dt * 3.6
-            if speed_kmh < 200:
-                speed_ch.samples.append((ts_sec, speed_kmh))
-
-        prev_lat, prev_lon, prev_ts = lat, lon, ts_sec
+        # Speed from velocity components (cm/s)
+        vn = struct.unpack_from("<i", dec, bs + 32)[0]
+        ve = struct.unpack_from("<i", dec, bs + 36)[0]
+        if abs(vn) < 50000 and abs(ve) < 50000:
+            speed_kmh = math.sqrt(vn**2 + ve**2) * 3.6 / 100
+            speed_ch.samples.append((ts_sec, speed_kmh))
 
     if lat_ch.samples:
         channels[_GPS_LAT_ID] = lat_ch
