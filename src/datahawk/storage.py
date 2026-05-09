@@ -60,15 +60,43 @@ def get_or_create_device(name: str) -> str:
     return device_id
 
 
+def get_imported_filenames() -> set[str]:
+    """Return set of original_filename values already imported."""
+    db = _get_db()
+    rows = db.execute("SELECT original_filename FROM sessions").fetchall()
+    db.close()
+    return {r["original_filename"] for r in rows}
+
+
 def save_session(device_id: str, original_filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
                  track: str = "") -> str:
-    """Save session file and metadata. Returns session ID."""
+    """Save session file and metadata. Overwrites if already imported. Returns session ID."""
+    db = _get_db()
+
+    # Check for existing
+    existing = db.execute(
+        "SELECT id, file_path FROM sessions WHERE original_filename = ?",
+        (original_filename,)
+    ).fetchone()
+
+    if existing:
+        # Overwrite: update file and metadata
+        (SESSIONS_DIR / existing["file_path"]).write_bytes(data)
+        db.execute(
+            """UPDATE sessions SET device_id=?, date=?, time=?, laps=?, track=?,
+               size=?, imported_at=? WHERE id=?""",
+            (device_id, date, time, laps, track, len(data),
+             datetime.now().isoformat(), existing["id"]),
+        )
+        db.commit()
+        db.close()
+        return existing["id"]
+
     session_id = uuid.uuid4().hex[:12]
     rel_path = f"{session_id}.xrz"
     (SESSIONS_DIR / rel_path).write_bytes(data)
 
-    db = _get_db()
     db.execute(
         """INSERT INTO sessions
            (id, device_id, original_filename, date, time, laps, track, size, file_path, imported_at)

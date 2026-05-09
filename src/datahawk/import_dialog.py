@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from datahawk.mychron import check_device, list_sessions, download_session, Session
-from datahawk.storage import get_or_create_device, save_session
+from datahawk.storage import get_or_create_device, save_session, get_imported_filenames
 
 
 DEVICE_NAME = "MyChron 5"
@@ -81,8 +81,8 @@ class ImportDialog(QDialog):
 
         # Sessions table
         self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["Name", "Date", "Time", "Laps", "Track"])
+        self._table.setColumnCount(6)
+        self._table.setHorizontalHeaderLabels(["Name", "Date", "Time", "Laps", "Track", "Status"])
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -128,6 +128,7 @@ class ImportDialog(QDialog):
         self._status.setText(f"{len(sessions)} sessions found")
         self._refresh_btn.setEnabled(True)
 
+        imported = get_imported_filenames()
         self._table.setRowCount(len(sessions))
         for i, s in enumerate(sessions):
             self._table.setItem(i, 0, QTableWidgetItem(s.name))
@@ -135,6 +136,10 @@ class ImportDialog(QDialog):
             self._table.setItem(i, 2, QTableWidgetItem(s.time))
             self._table.setItem(i, 3, QTableWidgetItem(s.laps))
             self._table.setItem(i, 4, QTableWidgetItem(s.track))
+            status = "✓ Imported" if s.name in imported else ""
+            item = QTableWidgetItem(status)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._table.setItem(i, 5, item)
 
     def _on_error(self, msg: str):
         self._status.setText("Connection failed")
