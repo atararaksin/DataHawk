@@ -109,6 +109,86 @@ def check_device(ip: str = DEVICE_IP) -> bool:
         ka.close()
 
 
+CHUNK_SIZE = 65472
+ACK = "3c685354435004000000003e000000003c5354435000003e"
+
+
+def _build_chunk_ack(chunk_num: int) -> bytes:
+    offset = chunk_num * CHUNK_SIZE
+    body = struct.pack("<I", offset)
+    checksum = sum(body) & 0xFFFF
+    hdr = b"<hSTCP" + struct.pack("<I", 4) + b"\x00>"
+    ftr = b"<STCP" + struct.pack("<H", checksum) + b">"
+    return hdr + body + ftr
+
+
+def _build_download_cmd(filepath: str) -> bytes:
+    body = bytearray(64)
+    body[8] = 0x02; body[10] = 0x04; body[24] = 0x01
+    path_bytes = filepath.encode("ascii")[:30]
+    body[32:32 + len(path_bytes)] = path_bytes
+    tag = b"STNC"
+    hdr = b"<h" + tag + struct.pack("<I", 64) + b"\x00>"
+    ftr = b"<" + tag + struct.pack("<H", sum(body) & 0xFFFF) + b">"
+    return hdr + bytes(body) + ftr
+
+
+def _do_setup(sock):
+    for cmd_hex in SETUP_CMDS:
+        sock.sendall(bytes.fromhex(cmd_hex))
+        _recv(sock, idle=0.1, max_t=3.0)
+    sock.sendall(bytes.fromhex(REHANDSHAKE))
+    _recv(sock, idle=0.1, max_t=2.0)
+
+
+def download_session(session_name: str, expected_size: int = 0, ip: str = DEVICE_IP) -> bytes:
+    """Download a session file from the device. Returns raw .xrz bytes."""
+    filepath = f"1:/mem/{session_name}"
+    if not filepath.endswith(".xrz"):
+        filepath += ".xrz"
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(10.0)
+    sock.connect((ip, TCP_PORT))
+    _do_setup(sock)
+
+    sock.sendall(_build_download_cmd(filepath))
+    _recv(sock, idle=0.5, max_t=5.0)
+
+    sock.sendall(bytes.fromhex(ACK))
+
+    all_data = bytearray()
+    chunk_num = 1
+    while True:
+        chunk = _recv(sock, idle=2.0, max_t=30.0)
+        if not chunk:
+            break
+        all_data.extend(chunk)
+        if expected_size and len(all_data) >= expected_size + 500:
+            break
+        if len(chunk) < 30000:
+            break
+        sock.sendall(_build_chunk_ack(chunk_num))
+        chunk_num += 1
+
+    sock.close()
+
+    # Parse STCP frames
+    raw = bytes(all_data)
+    clean = bytearray()
+    pos = 0
+    while pos < len(raw):
+        if pos + 12 > len(raw) or raw[pos:pos + 6] != b"<hSTCP":
+            break
+        body_len = struct.unpack_from("<I", raw, pos + 6)[0]
+        data_start = pos + 12 + 4
+        data_end = pos + 12 + body_len
+        clean.extend(raw[data_start:data_end])
+        pos = data_end + 8
+
+    return bytes(clean)
+
+
 def list_sessions(ip: str = DEVICE_IP) -> list[Session]:
     """Connect to device and return list of available sessions."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

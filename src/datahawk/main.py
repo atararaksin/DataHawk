@@ -33,10 +33,9 @@ class MainWindow(QMainWindow):
     def _on_import(self):
         dialog = ImportDialog(self)
         if dialog.exec():
-            sessions = dialog.selected_sessions()
-            if sessions:
-                names = ", ".join(s.name for s in sessions)
-                self.statusBar().showMessage(f"Selected: {names}", 5000)
+            self.statusBar().showMessage(
+                f"Imported {dialog.imported_count} session(s)", 5000
+            )
 
 
 def main():
