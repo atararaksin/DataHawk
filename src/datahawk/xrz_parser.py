@@ -160,42 +160,48 @@ _GPS_SPEED_ID = -3
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
     """Parse GPS blocks and add lat/lon/speed as synthetic channels."""
+    import math
+
     lat_ch = Channel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
     lon_ch = Channel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
     speed_ch = Channel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
 
-    pos = 0
+    # Encoding (empirically determined from WCKC Chilliwack BC):
+    # offset 0: timestamp (ms, session-local)
+    # offset 20: longitude (raw / 2905385 = degrees)
+    # offset 24: latitude (raw / 9768000 = degrees)
+    LON_FACTOR = 2905385.0
+    LAT_FACTOR = 9768000.0
+
     prev_lat = prev_lon = prev_ts = None
+    pos = 0
     while True:
         idx = dec.find(b"<hGPS\x00", pos)
         if idx == -1:
             break
-        body_len = struct.unpack_from("<I", dec, idx + 5)[0]
-        body = dec[idx + 12: idx + 12 + min(body_len, 56)]
-        pos = idx + 12 + body_len
+        bs = idx + 12
+        if bs + 28 > len(dec):
+            break
 
-        if len(body) < 28:
-            continue
+        ts_sec = struct.unpack_from("<I", dec, bs)[0] / 1000.0
+        lon = struct.unpack_from("<i", dec, bs + 20)[0] / LON_FACTOR
+        lat = struct.unpack_from("<i", dec, bs + 24)[0] / LAT_FACTOR
 
-        ts_sec = struct.unpack_from("<I", body, 0)[0] / 1000.0
-        lat = struct.unpack_from("<i", body, 4)[0] * 180.0 / (2**31)
-        lon = struct.unpack_from("<i", body, 20)[0] / 2905385.0
+        pos = idx + 12
 
         if abs(lat) < 1.0 or abs(lon) < 1.0:
-            continue  # no fix
+            continue
 
         lat_ch.samples.append((ts_sec, lat))
         lon_ch.samples.append((ts_sec, lon))
 
-        # Compute speed from position deltas
         if prev_lat is not None and ts_sec > prev_ts:
-            import math
             dt = ts_sec - prev_ts
             dlat = math.radians(lat - prev_lat)
             dlon = math.radians(lon - prev_lon) * math.cos(math.radians(lat))
             dist = math.sqrt(dlat**2 + dlon**2) * 6371000
             speed_kmh = dist / dt * 3.6
-            if speed_kmh < 200:  # filter GPS jumps
+            if speed_kmh < 200:
                 speed_ch.samples.append((ts_sec, speed_kmh))
 
         prev_lat, prev_lon, prev_ts = lat, lon, ts_sec
