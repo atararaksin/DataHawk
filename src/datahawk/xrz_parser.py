@@ -15,6 +15,7 @@ class Channel:
     id: int
     short_name: str
     long_name: str
+    is_float16: bool = True
     samples: list[tuple[float, float]] = field(default_factory=list, repr=False)
 
     @property
@@ -63,7 +64,10 @@ def _parse_channels(dec: bytes) -> dict[int, Channel]:
         body = dec[p + 12: p + 12 + _CHS_BODY_LEN]
         short = body[24:32].split(b"\x00")[0].decode("ascii", errors="replace")
         long_name = body[32:64].split(b"\x00")[0].decode("ascii", errors="replace")
-        channels[seq] = Channel(id=seq, short_name=short, long_name=long_name)
+        # b16=1 + b20=20 -> float16; b16=2 -> raw uint16
+        b16 = struct.unpack_from("<H", body, 16)[0]
+        is_float16 = (b16 != 2)
+        channels[seq] = Channel(id=seq, short_name=short, long_name=long_name, is_float16=is_float16)
         pos = p + 12 + _CHS_BODY_LEN
         seq += 1
     return channels
@@ -136,7 +140,10 @@ def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
             if raw == 31744:  # float16 infinity = no data
                 pos = idx + frame_len
                 continue
-            value = struct.unpack("<e", struct.pack("<H", raw))[0]
+            if ch_id in channels and channels[ch_id].is_float16:
+                value = struct.unpack("<e", struct.pack("<H", raw))[0]
+            else:
+                value = float(raw)
         else:
             value = struct.unpack_from("<f", dec, idx + 8)[0]
             if value != value:  # NaN check
