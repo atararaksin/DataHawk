@@ -156,6 +156,9 @@ def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
 _GPS_LAT_ID = -1  # synthetic channel IDs for GPS
 _GPS_LON_ID = -2
 _GPS_SPEED_ID = -3
+_GPS_VN_ID = -4
+_GPS_VE_ID = -5
+_GPS_VD_ID = -6
 
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
@@ -165,6 +168,9 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
     lat_ch = Channel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
     lon_ch = Channel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
     speed_ch = Channel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
+    vn_ch = Channel(id=_GPS_VN_ID, short_name="GPSvN", long_name="GPS Velocity N")
+    ve_ch = Channel(id=_GPS_VE_ID, short_name="GPSvE", long_name="GPS Velocity E")
+    vd_ch = Channel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
 
     # Encoding (empirically determined from WCKC Chilliwack BC):
     # offset 0: timestamp (ms, session-local)
@@ -203,12 +209,18 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         if abs(vn) < 50000 and abs(ve) < 50000:
             speed_kmh = math.sqrt(vn**2 + ve**2 + vd**2) * 3.6 / 100
             speed_ch.samples.append((ts_sec, speed_kmh))
+            vn_ch.samples.append((ts_sec, vn * 3.6 / 100))
+            ve_ch.samples.append((ts_sec, ve * 3.6 / 100))
+            vd_ch.samples.append((ts_sec, vd * 3.6 / 100))
 
     if lat_ch.samples:
         channels[_GPS_LAT_ID] = lat_ch
         channels[_GPS_LON_ID] = lon_ch
     if speed_ch.samples:
         channels[_GPS_SPEED_ID] = speed_ch
+        channels[_GPS_VN_ID] = vn_ch
+        channels[_GPS_VE_ID] = ve_ch
+        channels[_GPS_VD_ID] = vd_ch
 
 
 def parse_xrz(path: Union[Path, str]) -> ParsedSession:
