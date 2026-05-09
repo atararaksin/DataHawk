@@ -1,13 +1,11 @@
 """DataHawk main application entry point."""
 
 import sys
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QToolBar,
-)
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QMainWindow, QToolBar
 from PySide6.QtGui import QAction
 
 from datahawk.import_dialog import ImportDialog
+from datahawk.session_browser import SessionBrowser
 
 
 class MainWindow(QMainWindow):
@@ -25,10 +23,9 @@ class MainWindow(QMainWindow):
         import_action.triggered.connect(self._on_import)
         toolbar.addAction(import_action)
 
-        # Central placeholder
-        label = QLabel("DataHawk — Go-kart Telemetry & Video Analysis")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(label)
+        # Session browser as central widget
+        self._browser = SessionBrowser()
+        self.setCentralWidget(self._browser)
 
     def _on_import(self):
         dialog = ImportDialog(self)
@@ -36,6 +33,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Imported {dialog.imported_count} session(s)", 5000
             )
+            self._browser.refresh()
 
 
 def main():
