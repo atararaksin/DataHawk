@@ -15,7 +15,7 @@ class SessionBrowser(QWidget):
 
         self._table = QTableWidget()
         self._table.setColumnCount(6)
-        self._table.setHorizontalHeaderLabels(["Name", "Date", "Time", "Laps", "Track", "Device"])
+        self._table.setHorizontalHeaderLabels(["Name", "Date", "Time", "Laps", "Track", "Driver"])
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -32,4 +32,4 @@ class SessionBrowser(QWidget):
             self._table.setItem(i, 2, QTableWidgetItem(s["time"] or ""))
             self._table.setItem(i, 3, QTableWidgetItem(s["laps"] or ""))
             self._table.setItem(i, 4, QTableWidgetItem(s["track"] or ""))
-            self._table.setItem(i, 5, QTableWidgetItem(s["device_name"]))
+            self._table.setItem(i, 5, QTableWidgetItem(s["driver"] or ""))

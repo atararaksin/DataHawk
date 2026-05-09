@@ -4,14 +4,11 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QProgressBar,
+    QProgressBar, QLineEdit,
 )
 
 from datahawk.mychron import check_device, list_sessions, download_session, Session
-from datahawk.storage import get_or_create_device, save_session, get_imported_filenames
-
-
-DEVICE_NAME = "MyChron 5"
+from datahawk.storage import save_session, get_imported_filenames
 
 
 class _ListWorker(QThread):
@@ -29,24 +26,24 @@ class _ListWorker(QThread):
 
 
 class _DownloadWorker(QThread):
-    progress = Signal(int, int)  # current, total
-    finished = Signal(int)  # count imported
+    progress = Signal(int, int)
+    finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, sessions: list[Session]):
+    def __init__(self, sessions: list[Session], driver: str):
         super().__init__()
         self._sessions = sessions
+        self._driver = driver
 
     def run(self):
         try:
-            device_id = get_or_create_device(DEVICE_NAME)
             count = 0
             for i, s in enumerate(self._sessions):
                 self.progress.emit(i + 1, len(self._sessions))
                 data = download_session(s.name, expected_size=s.size)
                 if data and len(data) > 200:
                     save_session(
-                        device_id=device_id,
+                        driver=self._driver,
                         original_filename=s.name,
                         data=data,
                         date=s.date,
@@ -70,6 +67,14 @@ class ImportDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        # Driver name input
+        driver_row = QHBoxLayout()
+        driver_row.addWidget(QLabel("Driver:"))
+        self._driver_input = QLineEdit()
+        self._driver_input.setPlaceholderText("Enter driver name")
+        driver_row.addWidget(self._driver_input)
+        layout.addLayout(driver_row)
+
         # Status bar
         status_row = QHBoxLayout()
         self._status = QLabel("Connecting to device...")
@@ -88,7 +93,7 @@ class ImportDialog(QDialog):
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         layout.addWidget(self._table)
 
-        # Progress bar (hidden initially)
+        # Progress bar
         self._progress = QProgressBar()
         self._progress.hide()
         layout.addWidget(self._progress)
@@ -105,13 +110,17 @@ class ImportDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
 
-        self._table.itemSelectionChanged.connect(
-            lambda: self._import_btn.setEnabled(len(self._table.selectedItems()) > 0)
-        )
+        self._table.itemSelectionChanged.connect(self._update_import_btn)
+        self._driver_input.textChanged.connect(self._update_import_btn)
 
         self._worker = None
         self._dl_worker = None
         self._load_sessions()
+
+    def _update_import_btn(self):
+        has_selection = len(self._table.selectedItems()) > 0
+        has_driver = bool(self._driver_input.text().strip())
+        self._import_btn.setEnabled(has_selection and has_driver)
 
     def _load_sessions(self):
         self._status.setText("Connecting to device...")
@@ -147,6 +156,11 @@ class ImportDialog(QDialog):
         QMessageBox.warning(self, "Connection Error", msg)
 
     def _do_import(self):
+        driver = self._driver_input.text().strip()
+        if not driver:
+            QMessageBox.warning(self, "Driver Required", "Please enter a driver name.")
+            return
+
         rows = sorted(set(idx.row() for idx in self._table.selectedIndexes()))
         selected = [self._sessions[r] for r in rows]
         if not selected:
@@ -155,12 +169,13 @@ class ImportDialog(QDialog):
         self._import_btn.setEnabled(False)
         self._refresh_btn.setEnabled(False)
         self._table.setEnabled(False)
+        self._driver_input.setEnabled(False)
         self._progress.setRange(0, len(selected))
         self._progress.setValue(0)
         self._progress.show()
         self._status.setText("Downloading...")
 
-        self._dl_worker = _DownloadWorker(selected)
+        self._dl_worker = _DownloadWorker(selected, driver)
         self._dl_worker.progress.connect(self._on_dl_progress)
         self._dl_worker.finished.connect(self._on_dl_done)
         self._dl_worker.error.connect(self._on_dl_error)
@@ -181,6 +196,7 @@ class ImportDialog(QDialog):
         self._table.setEnabled(True)
         self._import_btn.setEnabled(True)
         self._refresh_btn.setEnabled(True)
+        self._driver_input.setEnabled(True)
         QMessageBox.warning(self, "Download Error", msg)
 
     @property
