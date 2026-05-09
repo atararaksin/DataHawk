@@ -202,19 +202,16 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         lat_ch.samples.append((ts_sec, lat))
         lon_ch.samples.append((ts_sec, lon))
 
-        # Speed from 2D velocity components
-        # Raw units empirically calibrated: magnitude * 3.6 / 94.16 = km/h
-        # (verified against MyChron device display: 112 km/h max)
-        VEL_TO_KMH = 3.6 / 94.16
+        # Speed from velocity components (confirmed 3D matches Race Studio)
         vn = struct.unpack_from("<i", dec, bs + 32)[0]
         ve = struct.unpack_from("<i", dec, bs + 36)[0]
         vd = struct.unpack_from("<i", dec, bs + 40)[0]
         if abs(vn) < 50000 and abs(ve) < 50000:
-            speed_kmh = math.sqrt(vn**2 + ve**2) * VEL_TO_KMH
+            speed_kmh = math.sqrt(vn**2 + ve**2 + vd**2) * 3.6 / 100
             speed_ch.samples.append((ts_sec, speed_kmh))
-            vn_ch.samples.append((ts_sec, vn * VEL_TO_KMH))
-            ve_ch.samples.append((ts_sec, ve * VEL_TO_KMH))
-            vd_ch.samples.append((ts_sec, vd * VEL_TO_KMH))
+            vn_ch.samples.append((ts_sec, vn * 3.6 / 100))
+            ve_ch.samples.append((ts_sec, ve * 3.6 / 100))
+            vd_ch.samples.append((ts_sec, vd * 3.6 / 100))
 
     if lat_ch.samples:
         channels[_GPS_LAT_ID] = lat_ch
