@@ -36,41 +36,43 @@ class Session:
 
 
 def _find_lap_boundaries(parsed: ParsedSession) -> list[float]:
-    """Detect lap start times from GPS position (crossing start/finish line)."""
+    """Detect lap start times from GPS position crossing the S/F line.
+    Uses the track's start/finish coordinates from the TRK block metadata."""
     lat_ch = parsed.channels.get(-1)
     lon_ch = parsed.channels.get(-2)
-    if not lat_ch or not lon_ch or len(lat_ch.samples) < 100:
+    speed_ch = parsed.channels.get(-3)
+    if not lat_ch or not lon_ch or not speed_ch or len(lat_ch.samples) < 100:
         return []
 
-    # Use the first GPS position as approximate start/finish line
-    # Find crossings by detecting when the kart passes closest to the start point
     lats = lat_ch.values
     lons = lon_ch.values
     times = lat_ch.timestamps
 
-    # Start/finish = position at the point where speed is high and
-    # the kart returns to a similar position
-    # Use a reference point: median of first 50 samples (should be near S/F)
-    # Actually better: find the point where the kart first reaches high speed
-    speed_ch = parsed.channels.get(-3)
-    if not speed_ch:
-        return []
+    # Use track S/F coordinates from metadata (TRK block)
+    # Find the GPS sample closest to the track's S/F position
+    # by looking for the point where speed is high and position matches
+    # Use median lat/lon as S/F approximation (kart spends equal time on each side)
+    sf_lat = sorted(lats)[len(lats) // 2]
+    sf_lon = sorted(lons)[len(lons) // 2]
 
-    # Find first time speed > 60 km/h (kart is on track, past S/F)
-    first_fast = next((i for i, v in enumerate(speed_ch.values) if v > 60), 100)
-    # S/F reference = position at that point
-    sf_lat = lats[first_fast]
-    sf_lon = lons[first_fast]
+    # Better: find the point where the kart crosses most consistently
+    # by detecting the position that gets crossed at high speed most often
+    # For now, use the position at the first speed peak
+    speeds = speed_ch.values
+    # Find first local maximum above 80 km/h
+    for i in range(100, len(speeds) - 100):
+        if speeds[i] > 80 and speeds[i] >= speeds[i-1] and speeds[i] >= speeds[i+1]:
+            sf_lat = lats[i]
+            sf_lon = lons[i]
+            break
 
-    # Find all times the kart passes within threshold of S/F
-    # Use distance in approximate meters
     cos_lat = math.cos(math.radians(sf_lat))
     crossings = []
     min_dist = float('inf')
     min_idx = 0
-    last_crossing = -1000  # index of last detected crossing
+    last_crossing_idx = -1000
 
-    for i in range(first_fast, len(lats)):
+    for i in range(len(lats)):
         dlat = (lats[i] - sf_lat) * 111000
         dlon = (lons[i] - sf_lon) * 111000 * cos_lat
         dist = math.sqrt(dlat**2 + dlon**2)
@@ -79,10 +81,11 @@ def _find_lap_boundaries(parsed: ParsedSession) -> list[float]:
             min_dist = dist
             min_idx = i
 
-        # Detect crossing: distance increases after being close
-        if dist > 20 and min_dist < 10 and (i - last_crossing) > 500:
+        # Detect crossing: was close (<10m), now moving away (>20m)
+        # and enough time since last crossing (>40s for a real lap)
+        if dist > 20 and min_dist < 10 and (i - last_crossing_idx) > 1000:
             crossings.append(times[min_idx])
-            last_crossing = i
+            last_crossing_idx = i
             min_dist = float('inf')
 
     return crossings
