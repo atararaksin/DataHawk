@@ -159,6 +159,8 @@ _GPS_SPEED_ID = -3
 _GPS_VN_ID = -4
 _GPS_VE_ID = -5
 _GPS_VD_ID = -6
+_GPS_LATACC_ID = -7
+_GPS_LONACC_ID = -8
 
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
@@ -221,6 +223,49 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         channels[_GPS_VN_ID] = vn_ch
         channels[_GPS_VE_ID] = ve_ch
         channels[_GPS_VD_ID] = vd_ch
+
+        # Compute lateral and longitudinal acceleration from velocity
+        _compute_gps_acceleration(speed_ch, vn_ch, ve_ch, channels)
+
+
+def _compute_gps_acceleration(speed_ch: Channel, vn_ch: Channel, ve_ch: Channel,
+                              channels: dict[int, Channel]) -> None:
+    """Compute GPS lateral/longitudinal acceleration from velocity components."""
+    import math
+    lat_acc = Channel(id=_GPS_LATACC_ID, short_name="GPSLatG", long_name="GPS Lat Acc")
+    lon_acc = Channel(id=_GPS_LONACC_ID, short_name="GPSLonG", long_name="GPS Lon Acc")
+
+    samples = list(zip(speed_ch.timestamps, speed_ch.values,
+                       [v for v in vn_ch.values], [v for v in ve_ch.values]))
+    N = 5  # smoothing half-window
+    for i in range(N, len(samples) - N):
+        t_i = samples[i][0]
+        dt = samples[i + N][0] - samples[i - N][0]
+        if dt <= 0:
+            continue
+        spd_ms = samples[i][1] / 3.6
+        # Heading from velocity components (already in km/h, convert to m/s)
+        vn_now = samples[i][2] / 3.6
+        ve_now = samples[i][2] / 3.6
+        h0 = math.atan2(samples[i - N][3] / 3.6, samples[i - N][2] / 3.6)
+        h1 = math.atan2(samples[i + N][3] / 3.6, samples[i + N][2] / 3.6)
+        dh = h1 - h0
+        if dh > math.pi: dh -= 2 * math.pi
+        if dh < -math.pi: dh += 2 * math.pi
+
+        # Longitudinal = dSpeed/dt
+        ds = (samples[i + N][1] - samples[i - N][1]) / 3.6
+        lon_g = (ds / dt) / 9.81
+
+        # Lateral = speed * dHeading/dt
+        lat_g = (spd_ms * dh / dt) / 9.81
+
+        lat_acc.samples.append((t_i, lat_g))
+        lon_acc.samples.append((t_i, lon_g))
+
+    if lat_acc.samples:
+        channels[_GPS_LATACC_ID] = lat_acc
+        channels[_GPS_LONACC_ID] = lon_acc
 
 
 def parse_xrz(path: Union[Path, str]) -> ParsedSession:
