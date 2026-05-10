@@ -36,59 +36,58 @@ class Session:
 
 
 def _find_lap_boundaries(parsed: ParsedSession) -> list[float]:
-    """Detect lap start times from GPS position crossing the S/F line.
-    Uses the track's start/finish coordinates from the TRK block metadata."""
-    lat_ch = parsed.channels.get(-1)
-    lon_ch = parsed.channels.get(-2)
-    speed_ch = parsed.channels.get(-3)
-    if not lat_ch or not lon_ch or not speed_ch or len(lat_ch.samples) < 100:
+    """Detect lap boundaries from channel 4 (lap time) events.
+    Returns list of lap boundary timestamps in seconds.
+    
+    Channel 4 stores lap times as uint32 milliseconds (not float32).
+    At each lap crossing, it fires with the completed lap duration.
+    Chain detection: each lap's end timestamp = next lap's start.
+    """
+    import zlib, struct
+
+    # We need raw uint32 values from channel 4, but the parser decodes as float32.
+    # Use the raw (S frame timestamps from channel 4 in the parsed data,
+    # and reconstruct uint32 values from the float32 bit pattern.
+    ch4 = parsed.channels.get(4)
+    if not ch4 or not ch4.samples:
         return []
 
-    lats = lat_ch.values
-    lons = lon_ch.values
-    times = lat_ch.timestamps
+    NAN_VAL = 4294955006  # sentinel for "no lap time"
 
-    # Use track S/F coordinates from metadata (TRK block)
-    # Find the GPS sample closest to the track's S/F position
-    # by looking for the point where speed is high and position matches
-    # Use median lat/lon as S/F approximation (kart spends equal time on each side)
-    sf_lat = sorted(lats)[len(lats) // 2]
-    sf_lon = sorted(lons)[len(lons) // 2]
+    # Reinterpret float32 -> uint32 (same bits, different type)
+    events = []
+    for t, fval in ch4.samples:
+        raw = struct.unpack('<I', struct.pack('<f', fval))[0]
+        events.append((t, raw))
 
-    # Better: find the point where the kart crosses most consistently
-    # by detecting the position that gets crossed at high speed most often
-    # For now, use the position at the first speed peak
-    speeds = speed_ch.values
-    # Find first local maximum above 80 km/h
-    for i in range(100, len(speeds) - 100):
-        if speeds[i] > 80 and speeds[i] >= speeds[i-1] and speeds[i] >= speeds[i+1]:
-            sf_lat = lats[i]
-            sf_lon = lons[i]
-            break
+    # Valid lap time events (45-90s = 45000-90000ms)
+    valid_events = [(t, v) for t, v in events if 45000 <= v <= 90000]
 
-    cos_lat = math.cos(math.radians(sf_lat))
-    crossings = []
-    min_dist = float('inf')
-    min_idx = 0
-    last_crossing_idx = -1000
+    if not valid_events:
+        return []
 
-    for i in range(len(lats)):
-        dlat = (lats[i] - sf_lat) * 111000
-        dlon = (lons[i] - sf_lon) * 111000 * cos_lat
-        dist = math.sqrt(dlat**2 + dlon**2)
+    # Chain laps: find consecutive events where each lap's start
+    # (timestamp - lap_time) matches the previous lap's end timestamp.
+    # Try each valid event as potential chain start, pick longest chain.
+    best_chain = []
 
-        if dist < min_dist:
-            min_dist = dist
-            min_idx = i
+    for start_idx in range(len(valid_events)):
+        ts_sec, val_ms = valid_events[start_idx]
+        chain = [ts_sec - val_ms / 1000.0, ts_sec]
+        current_end_ms = ts_sec * 1000
 
-        # Detect crossing: was close (<10m), now moving away (>20m)
-        # and enough time since last crossing (>40s for a real lap)
-        if dist > 20 and min_dist < 10 and (i - last_crossing_idx) > 1000:
-            crossings.append(times[min_idx])
-            last_crossing_idx = i
-            min_dist = float('inf')
+        for j in range(start_idx + 1, len(valid_events)):
+            ts_j, val_j = valid_events[j]
+            ts_j_ms = ts_j * 1000
+            lap_start_ms = ts_j_ms - val_j
+            if abs(lap_start_ms - current_end_ms) < 500:
+                chain.append(ts_j)
+                current_end_ms = ts_j_ms
 
-    return crossings
+        if len(chain) > len(best_chain):
+            best_chain = chain
+
+    return best_chain
 
 
 def _interpolate_at(target_time: float, times: list[float], values: list[float]) -> Optional[float]:
