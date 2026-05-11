@@ -21,7 +21,7 @@ class Lap:
     """A single lap reindexed to track position."""
     lap_index: int
     lap_time: float
-    lap_start: float
+    lap_start_time: float
     channels: dict[str, Channel] = field(default_factory=dict)
 
 
@@ -95,8 +95,8 @@ def _find_lap_boundaries(parsed: ParsedSession) -> list[float]:
     best_chain = []
     for start_idx in range(min(len(valid_events), 50)):  # only try first 50
         ts, val = valid_events[start_idx]
-        lap_start = ts - val / 1000.0
-        chain = [lap_start, ts]
+        lap_start_time = ts - val / 1000.0
+        chain = [lap_start_time, ts]
         current_end_ms = ts * 1000
 
         for j in range(start_idx + 1, len(valid_events)):
@@ -205,11 +205,11 @@ def process_session(parsed: ParsedSession) -> Session:
     cos_lat = math.cos(math.radians(ref_lats[0]))
 
     for lap_idx in range(len(crossings) - 1):
-        lap_start = crossings[lap_idx]
+        lap_start_time = crossings[lap_idx]
         lap_end = crossings[lap_idx + 1]
-        lap_time = lap_end - lap_start
+        lap_time = lap_end - lap_start_time
 
-        lap = Lap(lap_index=lap_idx, lap_time=lap_time, lap_start=lap_start)
+        lap = Lap(lap_index=lap_idx, lap_time=lap_time, lap_start_time=lap_start_time)
 
         if lap_idx == fastest_idx:
             # Reference lap: time-based interpolation (uniform time samples)
@@ -223,7 +223,7 @@ def process_session(parsed: ParsedSession) -> Session:
         else:
             # Other laps: distance-based interpolation
             # Get this lap's GPS positions and compute distance
-            lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start <= t < lap_end]
+            lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
             if len(lap_gps_idx) < 10:
                 # Incomplete lap
                 for ch_id, ch_name in channel_names.items():
