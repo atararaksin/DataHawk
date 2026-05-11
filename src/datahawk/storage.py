@@ -35,12 +35,6 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Migration: add columns if missing
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-    if "driver" not in cols:
-        conn.execute("ALTER TABLE sessions ADD COLUMN driver TEXT NOT NULL DEFAULT ''")
-    if "best_lap_time" not in cols:
-        conn.execute("ALTER TABLE sessions ADD COLUMN best_lap_time REAL")
     return conn
 
 
