@@ -33,6 +33,8 @@ class Session:
     track: str
     samples_per_lap: int
     reference_lap_index: int
+    best_lap_index: int
+    best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
 
 
@@ -158,6 +160,8 @@ def process_session(parsed: ParsedSession) -> Session:
             track=parsed.metadata.track,
             samples_per_lap=0,
             reference_lap_index=0,
+            best_lap_index=0,
+            best_lap_time=0.0,
         )
 
     # Find fastest lap
@@ -182,6 +186,7 @@ def process_session(parsed: ParsedSession) -> Session:
         return Session(
             start_time=parsed.metadata.time, date=parsed.metadata.date,
             track=parsed.metadata.track, samples_per_lap=0, reference_lap_index=0,
+            best_lap_index=0, best_lap_time=0.0,
         )
 
     # Compute reference lap distance array
@@ -200,6 +205,8 @@ def process_session(parsed: ParsedSession) -> Session:
         track=parsed.metadata.track,
         samples_per_lap=samples_per_lap,
         reference_lap_index=fastest_idx,
+        best_lap_index=fastest_idx,
+        best_lap_time=lap_times[fastest_idx],
     )
 
     cos_lat = math.cos(math.radians(ref_lats[0]))
