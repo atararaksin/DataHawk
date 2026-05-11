@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     laps TEXT,
     track TEXT,
     size INTEGER,
+    best_lap_time REAL,
     file_path TEXT NOT NULL,
     imported_at TEXT NOT NULL
 );
@@ -34,10 +35,12 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Migration: add driver column if missing
+    # Migration: add columns if missing
     cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
     if "driver" not in cols:
         conn.execute("ALTER TABLE sessions ADD COLUMN driver TEXT NOT NULL DEFAULT ''")
+    if "best_lap_time" not in cols:
+        conn.execute("ALTER TABLE sessions ADD COLUMN best_lap_time REAL")
     return conn
 
 
@@ -51,7 +54,7 @@ def get_imported_filenames() -> set[str]:
 
 def save_session(driver: str, original_filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
-                 track: str = "") -> str:
+                 track: str = "", best_lap_time: float = None) -> str:
     """Save session file and metadata. Overwrites if already imported. Returns session ID."""
     db = _get_db()
 
@@ -64,8 +67,8 @@ def save_session(driver: str, original_filename: str, data: bytes,
         (SESSIONS_DIR / existing["file_path"]).write_bytes(data)
         db.execute(
             """UPDATE sessions SET driver=?, date=?, time=?, laps=?, track=?,
-               size=?, imported_at=? WHERE id=?""",
-            (driver, date, time, laps, track, len(data),
+               size=?, best_lap_time=?, imported_at=? WHERE id=?""",
+            (driver, date, time, laps, track, len(data), best_lap_time,
              datetime.now().isoformat(), existing["id"]),
         )
         db.commit()
@@ -78,10 +81,10 @@ def save_session(driver: str, original_filename: str, data: bytes,
 
     db.execute(
         """INSERT INTO sessions
-           (id, driver, original_filename, date, time, laps, track, size, file_path, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, driver, original_filename, date, time, laps, track, size, best_lap_time, file_path, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (session_id, driver, original_filename, date, time, laps, track,
-         len(data), rel_path, datetime.now().isoformat()),
+         len(data), best_lap_time, rel_path, datetime.now().isoformat()),
     )
     db.commit()
     db.close()

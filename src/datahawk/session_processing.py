@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from datahawk.xrz_parser import ParsedSession, Channel as XrzChannel
+from datahawk.lap_detection import detect_lap_boundaries
 
 
 @dataclass
@@ -37,83 +38,6 @@ class Session:
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
 
-
-def _find_lap_boundaries(parsed: ParsedSession) -> list[float]:
-    """Detect lap boundaries from channel 4 (lap time) events.
-    
-    Channel 4 emits NaN at each S/F crossing, then predictive time updates,
-    then the actual lap time value when the next crossing occurs.
-    A lap boundary event = value matches elapsed time since last boundary.
-    """
-    import zlib, struct
-
-    # Read channel 4 raw from the XRZ (including NaN values the parser drops)
-    # We need to re-parse channel 4 from the decompressed data
-    from datahawk.xrz_parser import _CHS_PATTERN, _CHS_BODY_LEN
-    import pathlib
-
-    ch4 = parsed.channels.get(4)
-    if not ch4 or not ch4.samples:
-        return []
-
-    # Reconstruct full ch4 events including NaN by reinterpreting parsed float32
-    # AND finding the dropped NaN events from raw data
-    # Since we can't easily re-read the file here, use the parsed timestamps
-    # and reconstruct: the NaN events were at specific times before the first parsed sample
-
-    # Get all parsed ch4 values as uint32
-    events = []
-    for t, fval in ch4.samples:
-        raw = struct.unpack('<I', struct.pack('<f', fval))[0]
-        events.append((t, raw))
-
-    # The NaN events (dropped by parser) were at the start.
-    # From our analysis: last NaN was ~1.6s before first parsed sample.
-    # First parsed sample is a predictive time (~82000ms).
-    # The NaN timestamp = first_parsed_time - gap (~1.6s)
-    # But more precisely: NaN value = 4294955006, and it marks S/F crossing.
-    # We know from CSV that first S/F was at ~122.4s (offset 9.161 from CSV's 113.236s)
-    # Let's estimate: first_boundary = first_parsed_timestamp - first_parsed_value/1000
-    # Because the first predictive value tells us "predicted lap time from current position"
-    # and it was emitted shortly after the S/F crossing.
-
-    # Actually simpler: use the chain rule starting from the first event.
-    # The first real lap boundary is the event where:
-    # timestamp - value ≈ some earlier reference point (the NaN/S/F crossing)
-    # Since we don't have the exact NaN timestamp, find it by:
-    # first_boundary_time = first event where (timestamp - value) is consistent
-    # with subsequent events forming a chain.
-
-    # Strategy: find events where value = elapsed time since last boundary (±500ms)
-    # Start with the assumption that the first boundary is at
-    # (first_valid_lap_event_timestamp - first_valid_lap_event_value)
-
-    valid_events = [(t, v) for t, v in events if 45000 <= v <= 90000]
-    if not valid_events:
-        return []
-
-    # Try each valid event as the first lap completion.
-    # Its implied start = ts - val. Then chain forward.
-    best_chain = []
-    for start_idx in range(min(len(valid_events), 50)):  # only try first 50
-        ts, val = valid_events[start_idx]
-        lap_start_time = ts - val / 1000.0
-        chain = [lap_start_time, ts]
-        current_end_ms = ts * 1000
-
-        for j in range(start_idx + 1, len(valid_events)):
-            ts_j, val_j = valid_events[j]
-            ts_j_ms = ts_j * 1000
-            elapsed_since_last = ts_j_ms - current_end_ms
-            # Lap boundary: reported value matches elapsed time since last boundary
-            if abs(val_j - elapsed_since_last) < 500:
-                chain.append(ts_j)
-                current_end_ms = ts_j_ms
-
-        if len(chain) > len(best_chain):
-            best_chain = chain
-
-    return best_chain
 
 
 def _interpolate_at(target_time: float, times: list[float], values: list[float]) -> Optional[float]:
@@ -147,7 +71,7 @@ def _distance_along_track(lats: list[float], lons: list[float]) -> list[float]:
 
 def process_session(parsed: ParsedSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
-    crossings = _find_lap_boundaries(parsed)
+    crossings = detect_lap_boundaries(parsed)
 
     lat_ch = parsed.channels.get(-1)
     lon_ch = parsed.channels.get(-2)

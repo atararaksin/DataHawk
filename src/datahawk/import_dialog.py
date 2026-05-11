@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
 
 from datahawk.mychron import check_device, list_sessions, download_session, Session
 from datahawk.storage import save_session, get_imported_filenames
+from datahawk.xrz_parser import parse_xrz
+from datahawk.lap_detection import best_lap_time
 
 
 class _ListWorker(QThread):
@@ -42,6 +44,18 @@ class _DownloadWorker(QThread):
                 self.progress.emit(i + 1, len(self._sessions))
                 data = download_session(s.name, expected_size=s.size)
                 if data and len(data) > 200:
+                    # Detect best lap time from the session data
+                    try:
+                        from pathlib import Path
+                        import tempfile
+                        tmp = Path(tempfile.mktemp(suffix='.xrz'))
+                        tmp.write_bytes(data)
+                        parsed = parse_xrz(tmp)
+                        blt = best_lap_time(parsed)
+                        tmp.unlink()
+                    except Exception:
+                        blt = None
+
                     save_session(
                         driver=self._driver,
                         original_filename=s.name,
@@ -50,6 +64,7 @@ class _DownloadWorker(QThread):
                         time=s.time,
                         laps=s.laps,
                         track=s.track,
+                        best_lap_time=blt,
                     )
                     count += 1
             self.finished.emit(count)
