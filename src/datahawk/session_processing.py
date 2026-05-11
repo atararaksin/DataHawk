@@ -21,6 +21,7 @@ class Lap:
     """A single lap reindexed to track position."""
     lap_index: int
     lap_time: float
+    lap_start: float
     channels: dict[str, Channel] = field(default_factory=dict)
 
 
@@ -208,7 +209,7 @@ def process_session(parsed: ParsedSession) -> Session:
         lap_end = crossings[lap_idx + 1]
         lap_time = lap_end - lap_start
 
-        lap = Lap(lap_index=lap_idx, lap_time=lap_time)
+        lap = Lap(lap_index=lap_idx, lap_time=lap_time, lap_start=lap_start)
 
         if lap_idx == fastest_idx:
             # Reference lap: time-based interpolation (uniform time samples)
