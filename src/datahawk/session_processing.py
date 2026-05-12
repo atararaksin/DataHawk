@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -27,6 +28,13 @@ class Lap:
 
 
 @dataclass
+class TemporalIndexEntry:
+    """Maps a time step to a position in the reindexed data."""
+    lap_index: int
+    sample_index: int
+
+
+@dataclass
 class Session:
     """Processed session with laps aligned by track position."""
     start_time: str
@@ -37,6 +45,7 @@ class Session:
     best_lap_index: int
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
+    temporal_index: list[TemporalIndexEntry] = field(default_factory=list)
 
 
 
@@ -44,14 +53,12 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
     """Linear interpolation of values at target_time."""
     if not times or target_time < times[0] or target_time > times[-1]:
         return float('nan')
-    # Binary search
-    lo, hi = 0, len(times) - 1
-    while lo < hi - 1:
-        mid = (lo + hi) // 2
-        if times[mid] <= target_time:
-            lo = mid
-        else:
-            hi = mid
+    hi = bisect_right(times, target_time)
+    if hi == 0:
+        return values[0]
+    if hi >= len(times):
+        return values[-1]
+    lo = hi - 1
     if times[lo] == target_time:
         return values[lo]
     frac = (target_time - times[lo]) / (times[hi] - times[lo])
@@ -119,7 +126,7 @@ def process_session(parsed: ParsedSession) -> Session:
     # Collect all channel names we want to reindex
     channel_names = {}
     for ch_id, ch in parsed.channels.items():
-        if ch.samples:
+        if ch.timestamps:
             channel_names[ch_id] = ch.name
 
     # Process each lap
@@ -146,9 +153,13 @@ def process_session(parsed: ParsedSession) -> Session:
             # Reference lap: time-based interpolation (uniform time samples)
             for ch_id, ch_name in channel_names.items():
                 ch = parsed.channels[ch_id]
+                lo_i = max(0, bisect_left(ch.timestamps, ref_start) - 1)
+                hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, ref_end) + 1)
+                ch_times = ch.timestamps[lo_i:hi_i]
+                ch_vals = ch.values[lo_i:hi_i]
                 resampled = []
                 for t in ref_times:
-                    val = _interpolate_at(t, ch.timestamps, ch.values)
+                    val = _interpolate_at(t, ch_times, ch_vals)
                     resampled.append(val)
                 lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
         else:
@@ -176,6 +187,13 @@ def process_session(parsed: ParsedSession) -> Session:
 
             for ch_id, ch_name in channel_names.items():
                 ch = parsed.channels[ch_id]
+                # Pre-slice channel to lap time range for fast interpolation
+                lo_i = bisect_left(ch.timestamps, lap_start_time) - 1
+                hi_i = bisect_right(ch.timestamps, lap_end) + 1
+                lo_i = max(0, lo_i)
+                hi_i = min(len(ch.timestamps), hi_i)
+                ch_times = ch.timestamps[lo_i:hi_i]
+                ch_vals = ch.values[lo_i:hi_i]
                 resampled = []
                 for s_idx in range(samples_per_lap):
                     # Normalized position (0-1) from reference lap
@@ -187,10 +205,49 @@ def process_session(parsed: ParsedSession) -> Session:
                     if t_at_dist is None or math.isnan(t_at_dist):
                         resampled.append(float('nan'))
                     else:
-                        val = _interpolate_at(t_at_dist, ch.timestamps, ch.values)
+                        val = _interpolate_at(t_at_dist, ch_times, ch_vals)
                         resampled.append(val if val is not None else float('nan'))
                 lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
 
         session.laps.append(lap)
 
+    # Build temporal index
+    session.temporal_index = _build_temporal_index(session)
+
     return session
+
+
+def _build_temporal_index(session: Session) -> list[TemporalIndexEntry]:
+    """Build time-to-position mapping using reindexed Master Clk values."""
+    if not session.laps or session.samples_per_lap == 0:
+        return []
+    if "Master Clk" not in session.laps[0].channels:
+        return []
+
+    time_resolution = 0.04  # 25Hz
+
+    # Build flat sequence of (time, lap_index, sample_index)
+    flat: list[tuple[float, int, int]] = []
+    for lap in session.laps:
+        mc = lap.channels["Master Clk"]
+        for si, t in enumerate(mc.samples):
+            if t is not None and not math.isnan(t):
+                flat.append((t, lap.lap_index, si))
+
+    if not flat:
+        return []
+
+    start = flat[0][0]
+    end = flat[-1][0]
+    n_steps = int((end - start) / time_resolution)
+
+    index: list[TemporalIndexEntry] = []
+    ptr = 0
+    for step in range(n_steps):
+        t = start + step * time_resolution
+        while ptr < len(flat) - 1 and flat[ptr][0] < t:
+            ptr += 1
+        _, lap_idx, sample_idx = flat[ptr]
+        index.append(TemporalIndexEntry(lap_index=lap_idx, sample_index=sample_idx))
+
+    return index

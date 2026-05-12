@@ -16,19 +16,16 @@ class Channel:
     short_name: str
     long_name: str
     is_float16: bool = True
-    samples: list[tuple[float, float]] = field(default_factory=list, repr=False)
+    timestamps: list[float] = field(default_factory=list, repr=False)
+    values: list[float] = field(default_factory=list, repr=False)
 
     @property
     def name(self) -> str:
         return self.long_name or self.short_name
 
-    @property
-    def timestamps(self) -> list[float]:
-        return [s[0] for s in self.samples]
-
-    @property
-    def values(self) -> list[float]:
-        return [s[1] for s in self.samples]
+    def append(self, ts: float, val: float) -> None:
+        self.timestamps.append(ts)
+        self.values.append(val)
 
 
 @dataclass
@@ -142,13 +139,17 @@ def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
             else:
                 value = float(raw)
         else:
+            raw_u32 = struct.unpack_from("<I", dec, idx + 8)[0]
             value = struct.unpack_from("<f", dec, idx + 8)[0]
-            if value != value:  # NaN check
+            # Channel 0 (Master Clk) stores uint32 milliseconds, not float32
+            if ch_id == 0:
+                value = raw_u32 / 1000.0
+            elif value != value:  # NaN check
                 pos = idx + frame_len
                 continue
 
         if ch_id in channels:
-            channels[ch_id].samples.append((ts_sec, value))
+            channels[ch_id].append(ts_sec, value)
 
         pos = idx + frame_len
 
@@ -161,6 +162,7 @@ _GPS_VE_ID = -5
 _GPS_VD_ID = -6
 _GPS_LATACC_ID = -7
 _GPS_LONACC_ID = -8
+_GPS_DIST_ID = -9
 
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
@@ -201,8 +203,8 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         if abs(lat) < 1.0 or abs(lon) < 1.0:
             continue
 
-        lat_ch.samples.append((ts_sec, lat))
-        lon_ch.samples.append((ts_sec, lon))
+        lat_ch.append(ts_sec, lat)
+        lon_ch.append(ts_sec, lon)
 
         # Speed from velocity components (confirmed 3D matches Race Studio)
         vn = struct.unpack_from("<i", dec, bs + 32)[0]
@@ -210,15 +212,15 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         vd = struct.unpack_from("<i", dec, bs + 40)[0]
         if abs(vn) < 50000 and abs(ve) < 50000:
             speed_kmh = math.sqrt(vn**2 + ve**2 + vd**2) * 3.6 / 100
-            speed_ch.samples.append((ts_sec, speed_kmh))
-            vn_ch.samples.append((ts_sec, vn * 3.6 / 100))
-            ve_ch.samples.append((ts_sec, ve * 3.6 / 100))
-            vd_ch.samples.append((ts_sec, vd * 3.6 / 100))
+            speed_ch.append(ts_sec, speed_kmh)
+            vn_ch.append(ts_sec, vn * 3.6 / 100)
+            ve_ch.append(ts_sec, ve * 3.6 / 100)
+            vd_ch.append(ts_sec, vd * 3.6 / 100)
 
-    if lat_ch.samples:
+    if lat_ch.timestamps:
         channels[_GPS_LAT_ID] = lat_ch
         channels[_GPS_LON_ID] = lon_ch
-    if speed_ch.samples:
+    if speed_ch.timestamps:
         channels[_GPS_SPEED_ID] = speed_ch
         channels[_GPS_VN_ID] = vn_ch
         channels[_GPS_VE_ID] = ve_ch
@@ -226,6 +228,9 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
 
         # Compute lateral and longitudinal acceleration from velocity
         _compute_gps_acceleration(speed_ch, vn_ch, ve_ch, channels)
+
+        # Compute cumulative distance from lat/lon
+        _compute_gps_distance(lat_ch, lon_ch, channels)
 
 
 def _compute_gps_acceleration(speed_ch: Channel, vn_ch: Channel, ve_ch: Channel,
@@ -260,12 +265,31 @@ def _compute_gps_acceleration(speed_ch: Channel, vn_ch: Channel, ve_ch: Channel,
         # Lateral = speed * dHeading/dt
         lat_g = (spd_ms * dh / dt) / 9.81
 
-        lat_acc.samples.append((t_i, lat_g))
-        lon_acc.samples.append((t_i, lon_g))
+        lat_acc.append(t_i, lat_g)
+        lon_acc.append(t_i, lon_g)
 
-    if lat_acc.samples:
+    if lat_acc.timestamps:
         channels[_GPS_LATACC_ID] = lat_acc
         channels[_GPS_LONACC_ID] = lon_acc
+
+
+def _compute_gps_distance(lat_ch: Channel, lon_ch: Channel,
+                           channels: dict[int, Channel]) -> None:
+    """Compute cumulative GPS distance in meters from session start."""
+    import math
+    dist_ch = Channel(id=_GPS_DIST_ID, short_name="GPSDist", long_name="GPS Distance")
+    lats = lat_ch.values
+    lons = lon_ch.values
+    times = lat_ch.timestamps
+    cos_lat = math.cos(math.radians(lats[0]))
+    cum_dist = 0.0
+    dist_ch.append(times[0], 0.0)
+    for i in range(1, len(lats)):
+        dlat = (lats[i] - lats[i - 1]) * 111000
+        dlon = (lons[i] - lons[i - 1]) * 111000 * cos_lat
+        cum_dist += math.sqrt(dlat ** 2 + dlon ** 2)
+        dist_ch.append(times[i], cum_dist)
+    channels[_GPS_DIST_ID] = dist_ch
 
 
 def parse_xrz(path: Union[Path, str]) -> ParsedSession:

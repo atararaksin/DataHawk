@@ -23,12 +23,14 @@ def detect_lap_boundaries(parsed: ParsedSession) -> list[float]:
     Returns list of timestamps (seconds) marking each S/F crossing.
     """
     ch4 = parsed.channels.get(4)
-    if not ch4 or not ch4.samples:
+    if not ch4 or not ch4.timestamps:
         return []
 
     # Reinterpret float32 -> uint32 (channel 4 stores lap time as uint32 ms)
     events = []
-    for t, fval in ch4.samples:
+    for i in range(len(ch4.timestamps)):
+        t = ch4.timestamps[i]
+        fval = ch4.values[i]
         raw = struct.unpack('<I', struct.pack('<f', fval))[0]
         events.append((t, raw))
 
