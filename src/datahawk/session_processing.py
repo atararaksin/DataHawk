@@ -49,6 +49,69 @@ class Session:
 
 
 
+def _find_nearest_points(
+    ref_x: list[float], ref_y: list[float],
+    lap_x: list[float], lap_y: list[float],
+    max_radius: float,
+) -> list[tuple[int, float]]:
+    """For each ref point, find the nearest point on the current lap by 2D proximity.
+
+    Returns list of (segment_index, fraction) tuples. (-1, 0) if no point within max_radius.
+    Uses advancing pointer with early-exit when distance increases.
+    """
+    n_ref = len(ref_x)
+    n_lap = len(lap_x)
+    result: list[tuple[int, float]] = []
+    search_start = 0
+    max_r2 = max_radius * max_radius
+
+    for ri in range(n_ref):
+        rx, ry = ref_x[ri], ref_y[ri]
+        best_d2 = max_r2
+        best_seg = -1
+        best_frac = 0.0
+        found_improving = False
+
+        for li in range(search_start, n_lap - 1):
+            # Distance to segment midpoint (quick check)
+            d2_a = (lap_x[li] - rx) ** 2 + (lap_y[li] - ry) ** 2
+            d2_b = (lap_x[li + 1] - rx) ** 2 + (lap_y[li + 1] - ry) ** 2
+
+            # Project ref point onto segment
+            sx = lap_x[li + 1] - lap_x[li]
+            sy = lap_y[li + 1] - lap_y[li]
+            seg_len2 = sx * sx + sy * sy
+            if seg_len2 < 1e-12:
+                d2 = d2_a
+                frac = 0.0
+            else:
+                t = ((rx - lap_x[li]) * sx + (ry - lap_y[li]) * sy) / seg_len2
+                t = max(0.0, min(1.0, t))
+                px = lap_x[li] + t * sx
+                py = lap_y[li] + t * sy
+                d2 = (px - rx) ** 2 + (py - ry) ** 2
+                frac = t
+
+            if d2 < best_d2:
+                best_d2 = d2
+                best_seg = li
+                best_frac = frac
+                found_improving = True
+            elif found_improving:
+                # Distance increasing after we found a good match — stop
+                break
+
+        if best_seg >= 0:
+            result.append((best_seg, best_frac))
+            search_start = best_seg
+        else:
+            result.append((-1, 0.0))
+            # Advance pointer to keep progressing
+            search_start = min(search_start + 1, n_lap - 2)
+
+    return result
+
+
 def _interpolate_at(target_time: float, times: list[float], values: list[float]) -> Optional[float]:
     """Linear interpolation of values at target_time."""
     if not times or target_time < times[0] or target_time > times[-1]:
@@ -63,17 +126,6 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
         return values[lo]
     frac = (target_time - times[lo]) / (times[hi] - times[lo])
     return values[lo] + frac * (values[hi] - values[lo])
-
-
-def _distance_along_track(lats: list[float], lons: list[float]) -> list[float]:
-    """Compute cumulative distance along track in meters."""
-    cos_lat = math.cos(math.radians(lats[0])) if lats else 1.0
-    dist = [0.0]
-    for i in range(1, len(lats)):
-        dlat = (lats[i] - lats[i-1]) * 111000
-        dlon = (lons[i] - lons[i-1]) * 111000 * cos_lat
-        dist.append(dist[-1] + math.sqrt(dlat**2 + dlon**2))
-    return dist
 
 
 def process_session(parsed: ParsedSession) -> Session:
@@ -120,8 +172,10 @@ def process_session(parsed: ParsedSession) -> Session:
             best_lap_index=0, best_lap_time=0.0,
         )
 
-    # Compute reference lap distance array
-    ref_dist = _distance_along_track(ref_lats, ref_lons)
+    # Reference lap in local meter coordinates (for perpendicular intersection)
+    cos_lat = math.cos(math.radians(ref_lats[0]))
+    ref_x = [(lon - ref_lons[0]) * 111000 * cos_lat for lon in ref_lons]
+    ref_y = [(lat - ref_lats[0]) * 111000 for lat in ref_lats]
 
     # Collect all channel names we want to reindex
     channel_names = {}
@@ -139,8 +193,6 @@ def process_session(parsed: ParsedSession) -> Session:
         best_lap_index=fastest_idx,
         best_lap_time=lap_times[fastest_idx],
     )
-
-    cos_lat = math.cos(math.radians(ref_lats[0]))
 
     for lap_idx in range(len(crossings) - 1):
         lap_start_time = crossings[lap_idx]
@@ -163,11 +215,11 @@ def process_session(parsed: ParsedSession) -> Session:
                     resampled.append(val)
                 lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
         else:
-            # Other laps: distance-based interpolation
-            # Get this lap's GPS positions and compute distance
+            # Other laps: perpendicular intersection reindexing
+            # For each ref sample, find where current lap crosses the perpendicular
+            # line through that ref point (normal to ref trajectory)
             lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
             if len(lap_gps_idx) < 10:
-                # Incomplete lap
                 for ch_id, ch_name in channel_names.items():
                     lap.channels[ch_name] = Channel(
                         name=ch_name, samples=[float('nan')] * samples_per_lap
@@ -178,34 +230,36 @@ def process_session(parsed: ParsedSession) -> Session:
             lap_lats = [gps_lats[i] for i in lap_gps_idx]
             lap_lons = [gps_lons[i] for i in lap_gps_idx]
             lap_times_arr = [gps_times[i] for i in lap_gps_idx]
-            lap_dist = _distance_along_track(lap_lats, lap_lons)
 
-            # For each reference sample position, find corresponding time in this lap
-            # by matching distance along track
-            total_ref_dist = ref_dist[-1] if ref_dist[-1] > 0 else 1.0
-            total_lap_dist = lap_dist[-1] if lap_dist[-1] > 0 else 1.0
+            # Convert to local meters for intersection math
+            lap_x = [(lon - ref_lons[0]) * 111000 * cos_lat for lon in lap_lons]
+            lap_y = [(lat - ref_lats[0]) * 111000 for lat in lap_lats]
 
+            # Find interpolation fractions: for each ref sample, where does
+            # current lap cross the perpendicular line?
+            MAX_RADIUS = 8.0  # meters
+            fracs = _find_nearest_points(
+                ref_x, ref_y, lap_x, lap_y, MAX_RADIUS
+            )
+
+            # Interpolate all channels using the crossing fractions
             for ch_id, ch_name in channel_names.items():
                 ch = parsed.channels[ch_id]
-                # Pre-slice channel to lap time range for fast interpolation
-                lo_i = bisect_left(ch.timestamps, lap_start_time) - 1
-                hi_i = bisect_right(ch.timestamps, lap_end) + 1
-                lo_i = max(0, lo_i)
-                hi_i = min(len(ch.timestamps), hi_i)
+                lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
+                hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
                 ch_times = ch.timestamps[lo_i:hi_i]
                 ch_vals = ch.values[lo_i:hi_i]
                 resampled = []
                 for s_idx in range(samples_per_lap):
-                    # Normalized position (0-1) from reference lap
-                    norm_pos = ref_dist[s_idx] / total_ref_dist
-                    # Target distance in this lap
-                    target_dist = norm_pos * total_lap_dist
-                    # Find time at this distance (interpolate in lap_dist -> lap_times)
-                    t_at_dist = _interpolate_at(target_dist, lap_dist, lap_times_arr)
-                    if t_at_dist is None or math.isnan(t_at_dist):
+                    seg_idx, frac = fracs[s_idx]
+                    if seg_idx < 0:
                         resampled.append(float('nan'))
                     else:
-                        val = _interpolate_at(t_at_dist, ch_times, ch_vals)
+                        # Interpolate time between lap points seg_idx and seg_idx+1
+                        t_interp = lap_times_arr[seg_idx] + frac * (
+                            lap_times_arr[seg_idx + 1] - lap_times_arr[seg_idx]
+                        )
+                        val = _interpolate_at(t_interp, ch_times, ch_vals)
                         resampled.append(val if val is not None else float('nan'))
                 lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
 
