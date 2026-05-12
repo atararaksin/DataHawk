@@ -26,7 +26,7 @@ def sync_gopro_to_session(video_path: str | Path, session: ParsedSession) -> Syn
     Uses horizontal acceleration magnitude cross-correlation.
     Returns offset such that: video_time = mycron_time + offset
     """
-    gopro_mag = _extract_gopro_accel_magnitude(Path(video_path))
+    gopro_mag, timo = _extract_gopro_accel_magnitude(Path(video_path))
     mycron_mag = _compute_mycron_accel_magnitude(session)
 
     if not gopro_mag or not mycron_mag:
@@ -37,8 +37,13 @@ def sync_gopro_to_session(video_path: str | Path, session: ParsedSession) -> Syn
     m_sig = _resample_25hz(mycron_mag)
 
     # Cross-correlate
-    offset_samples, corr = _cross_correlate(g_sig, m_sig, max_lag_seconds=300)
+    offset_samples, corr = _cross_correlate(g_sig, m_sig)
     offset_s = offset_samples / 25.0
+
+    # Apply TIMO correction: GPMF telemetry starts timo seconds before video.
+    # Cross-correlation aligned telemetry streams, but video starts later than telemetry.
+    # To make video_time = mycron_time + offset correct, add timo.
+    offset_s += timo
 
     # Assess confidence based on peak sharpness
     confidence = "high" if corr > 0.4 else "medium" if corr > 0.25 else "low"
@@ -46,23 +51,34 @@ def sync_gopro_to_session(video_path: str | Path, session: ParsedSession) -> Syn
     return SyncResult(offset_seconds=offset_s, correlation=corr, confidence=confidence)
 
 
-def _extract_gopro_accel_magnitude(path: Path) -> list[tuple[float, float]]:
-    """Extract horizontal acceleration magnitude from GoPro GPMF at ~25Hz."""
+def _extract_gopro_accel_magnitude(path: Path) -> tuple[list[tuple[float, float]], float]:
+    """Extract horizontal acceleration magnitude from GoPro GPMF at ~25Hz.
+
+    Returns (time_value_pairs, timo) where timo is the telemetry-to-video offset.
+    """
     with open(path, "rb") as f:
         stco_data, stsz_data, sample_count = _find_gpmf_track(f)
         if sample_count == 0:
-            return []
+            return [], 0.0
 
         raw = []
+        timo = 0.0
         for i in range(sample_count):
             off = struct.unpack(">I", stco_data[8 + i * 4:12 + i * 4])[0]
             sz = struct.unpack(">I", stsz_data[12 + i * 4:16 + i * 4])[0]
             f.seek(off)
             sample = f.read(sz)
             _parse_accl_from_sample(sample, i, raw)
+            # Extract TIMO (telemetry-to-video offset) from first sample that has it
+            if timo == 0.0:
+                timo_idx = sample.find(b"TIMO")
+                if timo_idx >= 0 and timo_idx + 12 <= len(sample):
+                    timo = struct.unpack(">f", sample[timo_idx + 8:timo_idx + 12])[0]
 
     if not raw:
-        return []
+        return [], 0.0
+
+    # TIMO is extracted but applied post-correlation (see sync_gopro_to_session)
 
     # Low-pass filter: average over 8 samples (200Hz -> 25Hz)
     window = 8
@@ -80,8 +96,9 @@ def _extract_gopro_accel_magnitude(path: Path) -> list[tuple[float, float]]:
     bias_b = sum(s[2] for s in filtered[:cal_n]) / cal_n
 
     # Horizontal magnitude in g
-    return [(t, math.sqrt(((a - bias_a) / 9.81) ** 2 + ((b - bias_b) / 9.81) ** 2))
-            for t, a, b in filtered]
+    mag = [(t, math.sqrt(((a - bias_a) / 9.81) ** 2 + ((b - bias_b) / 9.81) ** 2))
+           for t, a, b in filtered]
+    return mag, timo
 
 
 def _find_gpmf_track(f) -> tuple[bytes, bytes, int]:
@@ -241,11 +258,11 @@ def _resample_25hz(time_val_pairs: list[tuple[float, float]]) -> list[float]:
 
 
 def _cross_correlate(g_sig: list[float], m_sig: list[float],
-                     max_lag_seconds: int = 300) -> tuple[int, float]:
+                     max_lag_seconds: int = 1500) -> tuple[int, float]:
     """Cross-correlate two signals using coarse-to-fine search.
 
-    Coarse pass at 5Hz finds approximate offset (±300s range),
-    then fine pass at 25Hz refines within ±5s. ~1.5s total.
+    Coarse pass at 2Hz finds approximate offset,
+    then fine pass at 25Hz refines within ±1s.
     Returns (best_lag_samples_at_25Hz, correlation).
     """
     def normalize(sig):
