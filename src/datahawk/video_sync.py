@@ -1,7 +1,13 @@
-"""Video-to-telemetry synchronization via accelerometer cross-correlation."""
+"""Video-to-telemetry synchronization.
+
+Two methods:
+- Accelerometer cross-correlation (works without GPS on camera)
+- Timestamp-based (requires GPS-synced clock on camera)
+"""
 
 from __future__ import annotations
 
+import datetime
 import math
 import struct
 from pathlib import Path
@@ -15,12 +21,13 @@ _GPS_LONACC_ID = -8
 
 class SyncResult(NamedTuple):
     """Result of video-telemetry synchronization."""
-    offset_seconds: float  # positive = video started before telemetry
-    correlation: float  # peak correlation strength (0-1)
+    offset_seconds: float  # video_time = mycron_time + offset
+    correlation: float  # peak correlation strength (0-1), or 1.0 for timestamp method
     confidence: str  # "high", "medium", "low"
+    method: str  # "accel" or "timestamp"
 
 
-def sync_gopro_to_session(video_path: str | Path, session: ParsedSession) -> SyncResult:
+def sync_by_acceleration(video_path: str | Path, session: ParsedSession) -> SyncResult:
     """Find time offset between a GoPro MP4 and a MyChron session.
 
     Uses horizontal acceleration magnitude cross-correlation.
@@ -48,7 +55,74 @@ def sync_gopro_to_session(video_path: str | Path, session: ParsedSession) -> Syn
     # Assess confidence based on peak sharpness
     confidence = "high" if corr > 0.4 else "medium" if corr > 0.25 else "low"
 
-    return SyncResult(offset_seconds=offset_s, correlation=corr, confidence=confidence)
+    return SyncResult(offset_seconds=offset_s, correlation=corr, confidence=confidence, method="accel")
+
+
+def sync_by_timestamp(video_path: str | Path, session: ParsedSession) -> SyncResult:
+    """Find time offset using MP4 creation timestamp vs MyChron session start.
+
+    Requires the camera's clock to be GPS-synced (accurate).
+    Returns offset such that: video_time = mycron_time + offset
+    """
+    video_start = _get_mp4_creation_time(Path(video_path))
+    if video_start is None:
+        return SyncResult(offset_seconds=0, correlation=0, confidence="low", method="timestamp")
+
+    # Parse MyChron session start time
+    # session.metadata has date="05/02/2026" and time="14:35:42"
+    try:
+        date_str = session.metadata.date  # "MM/DD/YYYY"
+        time_str = session.metadata.time  # "HH:MM:SS"
+        session_start = datetime.datetime.strptime(
+            f"{date_str} {time_str}", "%m/%d/%Y %H:%M:%S"
+        ).replace(tzinfo=datetime.timezone.utc)
+    except (ValueError, AttributeError):
+        return SyncResult(offset_seconds=0, correlation=0, confidence="low", method="timestamp")
+
+    # offset = video_start - session_start
+    # video_time = mycron_time + offset means:
+    #   at mycron t=0 (session start), video is at t=offset
+    offset_s = (video_start - session_start).total_seconds()
+
+    return SyncResult(offset_seconds=offset_s, correlation=1.0, confidence="high", method="timestamp")
+
+
+def _get_mp4_creation_time(path: Path) -> datetime.datetime | None:
+    """Extract creation time from MP4 mvhd box. Returns UTC datetime or None."""
+    mp4_epoch = datetime.datetime(1904, 1, 1, tzinfo=datetime.timezone.utc)
+
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+
+        moov_offset = _find_top_level_box(f, file_size, b"moov")
+        if moov_offset < 0:
+            return None
+
+        f.seek(moov_offset)
+        moov_size = struct.unpack(">I", f.read(4))[0]
+        f.read(4)  # skip 'moov'
+
+        # Find mvhd within moov
+        mvhd_data = f.read(min(moov_size - 8, 200))
+        mvhd_idx = mvhd_data.find(b"mvhd")
+        if mvhd_idx < 0:
+            return None
+
+        version = mvhd_data[mvhd_idx + 4]
+        if version == 0:
+            creation_secs = struct.unpack(">I", mvhd_data[mvhd_idx + 8:mvhd_idx + 12])[0]
+        else:
+            creation_secs = struct.unpack(">Q", mvhd_data[mvhd_idx + 8:mvhd_idx + 16])[0]
+
+        if creation_secs == 0:
+            return None
+
+        return mp4_epoch + datetime.timedelta(seconds=creation_secs)
+
+
+# Convenience wrapper (legacy name)
+sync_gopro_to_session = sync_by_acceleration
 
 
 def _extract_gopro_accel_magnitude(path: Path) -> tuple[list[tuple[float, float]], float]:
