@@ -16,6 +16,8 @@ class Channel:
     """A reindexed channel with fixed sample count per lap."""
     name: str
     samples: list[Optional[float]]  # NaN for missing data
+    raw_timestamps: list[float] = field(default_factory=list, repr=False)
+    raw_values: list[float] = field(default_factory=list, repr=False)
 
 
 @dataclass
@@ -57,32 +59,28 @@ def _find_nearest_points(
     """For each ref point, find the nearest point on the current lap by 2D proximity.
 
     Returns list of (segment_index, fraction) tuples. (-1, 0) if no point within max_radius.
-    Uses advancing pointer with early-exit when distance increases.
+    Uses advancing pointer: only advances on match, searches up to 50 segments ahead.
     """
     n_ref = len(ref_x)
     n_lap = len(lap_x)
     result: list[tuple[int, float]] = []
     search_start = 0
     max_r2 = max_radius * max_radius
+    MAX_SEARCH = 50
 
     for ri in range(n_ref):
         rx, ry = ref_x[ri], ref_y[ri]
         best_d2 = max_r2
         best_seg = -1
         best_frac = 0.0
-        found_improving = False
 
-        for li in range(search_start, n_lap - 1):
-            # Distance to segment midpoint (quick check)
-            d2_a = (lap_x[li] - rx) ** 2 + (lap_y[li] - ry) ** 2
-            d2_b = (lap_x[li + 1] - rx) ** 2 + (lap_y[li + 1] - ry) ** 2
-
-            # Project ref point onto segment
+        search_end = min(search_start + MAX_SEARCH, n_lap - 1)
+        for li in range(search_start, search_end):
             sx = lap_x[li + 1] - lap_x[li]
             sy = lap_y[li + 1] - lap_y[li]
             seg_len2 = sx * sx + sy * sy
             if seg_len2 < 1e-12:
-                d2 = d2_a
+                d2 = (lap_x[li] - rx) ** 2 + (lap_y[li] - ry) ** 2
                 frac = 0.0
             else:
                 t = ((rx - lap_x[li]) * sx + (ry - lap_y[li]) * sy) / seg_len2
@@ -96,18 +94,12 @@ def _find_nearest_points(
                 best_d2 = d2
                 best_seg = li
                 best_frac = frac
-                found_improving = True
-            elif found_improving:
-                # Distance increasing after we found a good match — stop
-                break
 
         if best_seg >= 0:
             result.append((best_seg, best_frac))
-            search_start = best_seg
+            search_start = best_seg  # advance only on match
         else:
             result.append((-1, 0.0))
-            # Advance pointer to keep progressing
-            search_start = min(search_start + 1, n_lap - 2)
 
     return result
 
@@ -213,7 +205,11 @@ def process_session(parsed: ParsedSession) -> Session:
                 for t in ref_times:
                     val = _interpolate_at(t, ch_times, ch_vals)
                     resampled.append(val)
-                lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
+                lap.channels[ch_name] = Channel(
+                    name=ch_name, samples=resampled,
+                    raw_timestamps=[t - ref_start for t in ch_times],
+                    raw_values=list(ch_vals),
+                )
         else:
             # Other laps: perpendicular intersection reindexing
             # For each ref sample, find where current lap crosses the perpendicular
@@ -221,8 +217,13 @@ def process_session(parsed: ParsedSession) -> Session:
             lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
             if len(lap_gps_idx) < 10:
                 for ch_id, ch_name in channel_names.items():
+                    ch = parsed.channels[ch_id]
+                    lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
+                    hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
                     lap.channels[ch_name] = Channel(
-                        name=ch_name, samples=[float('nan')] * samples_per_lap
+                        name=ch_name, samples=[float('nan')] * samples_per_lap,
+                        raw_timestamps=[t - lap_start_time for t in ch.timestamps[lo_i:hi_i]],
+                        raw_values=list(ch.values[lo_i:hi_i]),
                     )
                 session.laps.append(lap)
                 continue
@@ -255,13 +256,17 @@ def process_session(parsed: ParsedSession) -> Session:
                     if seg_idx < 0:
                         resampled.append(float('nan'))
                     else:
-                        # Interpolate time between lap points seg_idx and seg_idx+1
                         t_interp = lap_times_arr[seg_idx] + frac * (
                             lap_times_arr[seg_idx + 1] - lap_times_arr[seg_idx]
                         )
                         val = _interpolate_at(t_interp, ch_times, ch_vals)
                         resampled.append(val if val is not None else float('nan'))
-                lap.channels[ch_name] = Channel(name=ch_name, samples=resampled)
+                # Raw data: timestamps relative to lap start, values as-is
+                raw_ts = [t - lap_start_time for t in ch_times]
+                lap.channels[ch_name] = Channel(
+                    name=ch_name, samples=resampled,
+                    raw_timestamps=raw_ts, raw_values=list(ch_vals),
+                )
 
         session.laps.append(lap)
 

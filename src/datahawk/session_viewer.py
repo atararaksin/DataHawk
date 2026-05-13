@@ -123,9 +123,8 @@ class SessionViewer(QMainWindow):
         self._channel_names: list[str] = []
         if self._session.laps:
             for name in sorted(self._session.laps[0].channels.keys()):
-                if name != "Master Clk":
-                    self._combo.addItem(name)
-                    self._channel_names.append(name)
+                self._combo.addItem(name)
+                self._channel_names.append(name)
 
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
@@ -264,23 +263,30 @@ class SessionViewer(QMainWindow):
         if ch_name not in lap.channels:
             return
 
-        mc = lap.channels.get("Master Clk")
-        if not mc:
-            return
+        ch = lap.channels[ch_name]
 
-        t0 = mc.samples[0] if mc.samples else 0
-        times = [t - t0 for t in mc.samples]
-        samples = lap.channels[ch_name].samples
+        # Current lap: use raw (uninterpolated) data for full coverage
+        times = ch.raw_timestamps
+        samples = ch.raw_values
 
         self._plot.setLabel("left", ch_name)
         self._plot.plot(times, samples, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
 
-        # Reference lap overlay
+        # Reference lap overlay: use current lap's reindexed time axis + ref's reindexed values
         ref_sel = self._ref_combo.currentIndex() - 1
         if ref_sel >= 0 and ref_sel != lap_idx:
             ref_lap = self._session.laps[ref_sel]
             if ch_name in ref_lap.channels:
-                ref_samples = ref_lap.channels[ch_name].samples
-                self._plot.plot(times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
+                mc = lap.channels.get("Master Clk")
+                if mc:
+                    t0 = lap.lap_start_time
+                    ref_times = []
+                    ref_samples = []
+                    for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
+                        if t == t and v == v:  # skip NaN
+                            ref_times.append(t - t0)
+                            ref_samples.append(v)
+                    if ref_times:
+                        self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
 
         self._plot.enableAutoRange()
