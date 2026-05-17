@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datahawk.xrz_parser import XrzSession, _GPS_LAT_ID, _GPS_LON_ID, _GPS_HEADING_ID
 from datahawk.types import Line, Point
-from datahawk.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps
+from datahawk.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
 
 _CROSSING_LINE_LENGTH = 8.0  # meters
 
@@ -49,29 +49,7 @@ def detect_start_finish_fine(session: XrzSession) -> Line:
     if not lines:
         raise ValueError("Couldn't detect start/finish line")
 
-    # Throw away outliers: compute median lat/lon of midpoints, discard >3m from median
-    import math
-    mids = [Point((l.a.lat + l.b.lat) / 2, (l.a.lon + l.b.lon) / 2) for l in lines]
-    lats = sorted(m.lat for m in mids)
-    lons = sorted(m.lon for m in mids)
-    med_lat = lats[len(lats) // 2]
-    med_lon = lons[len(lons) // 2]
-
-    filtered: list[Line] = []
-    for line, mid in zip(lines, mids):
-        dist_m = math.hypot((mid.lat - med_lat) * 111320, (mid.lon - med_lon) * 111320 * math.cos(math.radians(med_lat)))
-        if dist_m < 3.0:
-            filtered.append(line)
-
-    if not filtered:
-        filtered = lines  # fallback: use all
-
-    # Average the filtered lines
-    avg_a_lat = sum(l.a.lat for l in filtered) / len(filtered)
-    avg_a_lon = sum(l.a.lon for l in filtered) / len(filtered)
-    avg_b_lat = sum(l.b.lat for l in filtered) / len(filtered)
-    avg_b_lon = sum(l.b.lon for l in filtered) / len(filtered)
-    return Line(a=Point(avg_a_lat, avg_a_lon), b=Point(avg_b_lat, avg_b_lon))
+    return mad_average_of_lines(lines)
 
 
 def detect_laps(session: XrzSession, sf_line: Line) -> list[float]:
