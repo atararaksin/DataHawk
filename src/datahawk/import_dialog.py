@@ -11,6 +11,7 @@ from datahawk.mychron import check_device, list_sessions, download_session, Sess
 from datahawk.storage import save_session, get_imported_filenames
 from datahawk.xrz_parser import parse_xrz
 from datahawk.lap_detection import best_lap_time
+from datahawk.session_processing import process_session
 
 
 class _ListWorker(QThread):
@@ -51,7 +52,8 @@ class _DownloadWorker(QThread):
                         tmp = Path(tempfile.mktemp(suffix='.xrz'))
                         tmp.write_bytes(data)
                         parsed = parse_xrz(tmp)
-                        blt = best_lap_time(parsed)
+                        session = process_session(parsed)
+                        blt = session.best_lap_time
                         tmp.unlink()
                     except Exception:
                         blt = None

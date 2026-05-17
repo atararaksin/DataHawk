@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
-from datahawk.lap_detection import detect_lap_boundaries
+from datahawk.lap_detection import detect_start_finish_fine, detect_laps
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session
 
 
@@ -84,7 +84,10 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
 
 def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
-    crossings = detect_lap_boundaries(parsed)
+    sf_line = detect_start_finish_fine(parsed)
+
+    lap_times = detect_laps(parsed, sf_line)
+    crossings = # TODO turn lap_times into lap time boudnaries
 
     lat_ch = parsed.channels.get(-1)
     lon_ch = parsed.channels.get(-2)
@@ -94,7 +97,7 @@ def process_session(parsed: XrzSession) -> Session:
         return Session(
             start_time=parsed.metadata.time,
             date=parsed.metadata.date,
-            track=parsed.metadata.track,
+            track=Track(name=parsed.metadata.track, sf_line=sf_line),
             samples_per_lap=0,
             reference_lap_index=0,
             best_lap_index=0,

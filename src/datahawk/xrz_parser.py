@@ -27,6 +27,9 @@ class XrzChannel:
         self.timestamps.append(ts)
         self.values.append(val)
 
+    def get_value_at_time_with_interpolation(self, ts: float) -> float:
+        #TODO
+
 
 @dataclass
 class XrzSessionMetadata:

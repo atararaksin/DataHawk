@@ -23,6 +23,10 @@ class Lap:
     lap_start_time: float
     channels: dict[str, Channel] = field(default_factory=dict)
 
+@dataclass
+class Track:
+    name: str
+    sf_line: Line
 
 @dataclass
 class TemporalIndexEntry:
@@ -36,10 +40,20 @@ class Session:
     """Processed session with laps aligned by track position."""
     start_time: str
     date: str
-    track: str
+    track: Track
     samples_per_lap: int
     reference_lap_index: int
     best_lap_index: int
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
     temporal_index: list[TemporalIndexEntry] = field(default_factory=list)
+
+@dataclass
+class Point:
+    lat: float
+    lon: float
+
+@dataclass
+class Line:
+    a: Point
+    b: Point
