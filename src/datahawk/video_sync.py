@@ -369,7 +369,7 @@ def _cross_correlate(g_sig: list[float], m_sig: list[float],
     m_coarse = normalize(m_sig[::step])
     coarse_lag, _ = _search(g_coarse, m_coarse,
                             max_lag_seconds * 2,
-                            60 * 2)
+                            min(len(g_coarse), len(m_coarse)) // 2)
 
     # Fine: full 25Hz, search ±1s around coarse result
     g_fine = normalize(g_sig)
