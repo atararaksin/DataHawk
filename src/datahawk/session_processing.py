@@ -9,7 +9,7 @@ from typing import Optional
 
 from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
 from datahawk.lap_detection import detect_start_finish_fine, detect_laps
-from datahawk.types import Channel, Lap, TemporalIndexEntry, Session
+from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
 
 
 
@@ -87,7 +87,7 @@ def process_session(parsed: XrzSession) -> Session:
     sf_line = detect_start_finish_fine(parsed)
 
     lap_times = detect_laps(parsed, sf_line)
-    crossings = # TODO turn lap_times into lap time boudnaries
+    crossings = lap_times  # detect_laps returns crossing timestamps directly
 
     lat_ch = parsed.channels.get(-1)
     lon_ch = parsed.channels.get(-2)
@@ -125,7 +125,7 @@ def process_session(parsed: XrzSession) -> Session:
     if samples_per_lap < 10:
         return Session(
             start_time=parsed.metadata.time, date=parsed.metadata.date,
-            track=parsed.metadata.track, samples_per_lap=0, reference_lap_index=0,
+            track=Track(name=parsed.metadata.track, sf_line=sf_line), samples_per_lap=0, reference_lap_index=0,
             best_lap_index=0, best_lap_time=0.0,
         )
 
@@ -144,7 +144,7 @@ def process_session(parsed: XrzSession) -> Session:
     session = Session(
         start_time=parsed.metadata.time,
         date=parsed.metadata.date,
-        track=parsed.metadata.track,
+        track=Track(name=parsed.metadata.track, sf_line=sf_line),
         samples_per_lap=samples_per_lap,
         reference_lap_index=fastest_idx,
         best_lap_index=fastest_idx,

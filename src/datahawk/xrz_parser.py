@@ -28,7 +28,16 @@ class XrzChannel:
         self.values.append(val)
 
     def get_value_at_time_with_interpolation(self, ts: float) -> float:
-        #TODO
+        """Interpolate channel value at given timestamp using binary search."""
+        import bisect
+        i = bisect.bisect_right(self.timestamps, ts)
+        if i == 0:
+            return self.values[0]
+        if i >= len(self.timestamps):
+            return self.values[-1]
+        t0, t1 = self.timestamps[i - 1], self.timestamps[i]
+        frac = (ts - t0) / (t1 - t0) if t1 != t0 else 0.0
+        return self.values[i - 1] + frac * (self.values[i] - self.values[i - 1])
 
 
 @dataclass
@@ -166,6 +175,7 @@ _GPS_VD_ID = -6
 _GPS_LATACC_ID = -7
 _GPS_LONACC_ID = -8
 _GPS_DIST_ID = -9
+_GPS_HEADING_ID = -10
 
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
@@ -178,6 +188,7 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     vn_ch = XrzChannel(id=_GPS_VN_ID, short_name="GPSvN", long_name="GPS Velocity N")
     ve_ch = XrzChannel(id=_GPS_VE_ID, short_name="GPSvE", long_name="GPS Velocity E")
     vd_ch = XrzChannel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
+    heading_ch = XrzChannel(id=_GPS_HEADING_ID, short_name="GPSHdg", long_name="GPS Heading")
 
     # Encoding (empirically determined from WCKC Chilliwack BC):
     # offset 0: timestamp (ms, session-local)
@@ -220,6 +231,20 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
             ve_ch.append(ts_sec, ve * 3.6 / 100)
             vd_ch.append(ts_sec, vd * 3.6 / 100)
 
+    # Heading from position deltas (vN/vE are NOT true N/E components)
+    _HEADING_GAP = 5
+    _M_PER_DEG_LAT = 111320.0
+    _m_per_deg_lon = 111320.0 * math.cos(math.radians(lat_ch.values[0])) if lat_ch.values else 1.0
+    for i in range(_HEADING_GAP, len(lat_ch.timestamps)):
+        speed_at_i = speed_ch.values[i] if i < len(speed_ch.values) else 0
+        if speed_at_i < 2.5:
+            continue
+        dn = (lat_ch.values[i] - lat_ch.values[i - _HEADING_GAP]) * _M_PER_DEG_LAT
+        de = (lon_ch.values[i] - lon_ch.values[i - _HEADING_GAP]) * _m_per_deg_lon
+        if abs(dn) < 0.05 and abs(de) < 0.05:
+            continue
+        heading_ch.append(lat_ch.timestamps[i], math.degrees(math.atan2(de, dn)) % 360)
+
     if lat_ch.timestamps:
         channels[_GPS_LAT_ID] = lat_ch
         channels[_GPS_LON_ID] = lon_ch
@@ -228,6 +253,7 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
         channels[_GPS_VN_ID] = vn_ch
         channels[_GPS_VE_ID] = ve_ch
         channels[_GPS_VD_ID] = vd_ch
+        channels[_GPS_HEADING_ID] = heading_ch
 
         # Compute lateral and longitudinal acceleration from velocity
         _compute_gps_acceleration(speed_ch, vn_ch, ve_ch, channels)
