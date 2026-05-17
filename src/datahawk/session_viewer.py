@@ -15,7 +15,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.xrz_parser import parse_xrz
-from datahawk.session_processing import process_session, Session
+from datahawk.session_processing import process_session
+from datahawk.types import Session
 
 
 class SessionViewer(QMainWindow):

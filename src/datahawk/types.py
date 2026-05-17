@@ -1,0 +1,45 @@
+"""Core data types for processed sessions."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+@dataclass
+class Channel:
+    """A reindexed channel with fixed sample count per lap."""
+    name: str
+    samples: list[Optional[float]]  # NaN for missing data
+    raw_timestamps: list[float] = field(default_factory=list, repr=False)
+    raw_values: list[float] = field(default_factory=list, repr=False)
+
+
+@dataclass
+class Lap:
+    """A single lap reindexed to track position."""
+    lap_index: int
+    lap_time: float
+    lap_start_time: float
+    channels: dict[str, Channel] = field(default_factory=dict)
+
+
+@dataclass
+class TemporalIndexEntry:
+    """Maps a time step to a position in the reindexed data."""
+    lap_index: int
+    sample_index: int
+
+
+@dataclass
+class Session:
+    """Processed session with laps aligned by track position."""
+    start_time: str
+    date: str
+    track: str
+    samples_per_lap: int
+    reference_lap_index: int
+    best_lap_index: int
+    best_lap_time: float
+    laps: list[Lap] = field(default_factory=list)
+    temporal_index: list[TemporalIndexEntry] = field(default_factory=list)
