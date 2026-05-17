@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 from datahawk.mychron import check_device, list_sessions, download_session, Session
 from datahawk.storage import save_session, get_imported_filenames
 from datahawk.xrz_parser import parse_xrz
-from datahawk.lap_detection import best_lap_time
 from datahawk.session_processing import process_session
 
 

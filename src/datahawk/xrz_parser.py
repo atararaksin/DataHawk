@@ -204,9 +204,9 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     lat_ch = XrzChannel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
     lon_ch = XrzChannel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
     speed_ch = XrzChannel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
-    vn_ch = XrzChannel(id=_GPS_VN_ID, short_name="GPSvN", long_name="GPS Velocity N")
-    ve_ch = XrzChannel(id=_GPS_VE_ID, short_name="GPSvE", long_name="GPS Velocity E")
-    vd_ch = XrzChannel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
+    vn_ch = XrzChannel(id=_GPS_VN_ID, short_name="GPSv1", long_name="GPS Velocity 1")
+    ve_ch = XrzChannel(id=_GPS_VE_ID, short_name="GPSv2", long_name="GPS Velocity 2")
+    vd_ch = XrzChannel(id=_GPS_VD_ID, short_name="GPSv3", long_name="GPS Velocity 3")
     heading_ch = XrzChannel(id=_GPS_HEADING_ID, short_name="GPSHdg", long_name="GPS Heading")
 
     # Encoding (confirmed ECEF Earth-Centered Earth-Fixed):
