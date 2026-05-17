@@ -10,7 +10,7 @@ from typing import Union
 
 
 @dataclass
-class Channel:
+class XrzChannel:
     """A telemetry channel definition."""
     id: int
     short_name: str
@@ -29,7 +29,7 @@ class Channel:
 
 
 @dataclass
-class SessionMetadata:
+class XrzSessionMetadata:
     """Non-temporal session metadata."""
     track: str = ""
     date: str = ""
@@ -38,10 +38,10 @@ class SessionMetadata:
 
 
 @dataclass
-class ParsedSession:
+class XrzSession:
     """Complete parsed XRZ session."""
-    metadata: SessionMetadata
-    channels: dict[int, Channel]
+    metadata: XrzSessionMetadata
+    channels: dict[int, XrzChannel]
 
 
 # CHS block header pattern: <hCHS\x00 + len=112(4) + flags=1(1) + >(1)
@@ -49,7 +49,7 @@ _CHS_PATTERN = bytes.fromhex("3c684348530070000000013e")
 _CHS_BODY_LEN = 112
 
 
-def _parse_channels(dec: bytes) -> dict[int, Channel]:
+def _parse_channels(dec: bytes) -> dict[int, XrzChannel]:
     """Extract channel definitions from CHS blocks. Key = sequential index (frame ID)."""
     channels = {}
     pos = 0
@@ -64,16 +64,16 @@ def _parse_channels(dec: bytes) -> dict[int, Channel]:
         # b16=1 + b20=20 -> float16; b16=2 -> raw uint16
         b16 = struct.unpack_from("<H", body, 16)[0]
         is_float16 = (b16 != 2)
-        channels[seq] = Channel(id=seq, short_name=short, long_name=long_name, is_float16=is_float16)
+        channels[seq] = XrzChannel(id=seq, short_name=short, long_name=long_name, is_float16=is_float16)
         pos = p + 12 + _CHS_BODY_LEN
         seq += 1
     return channels
 
 
-def _parse_metadata(dec: bytes) -> SessionMetadata:
+def _parse_metadata(dec: bytes) -> XrzSessionMetadata:
     """Extract session metadata from header blocks."""
     import re
-    meta = SessionMetadata()
+    meta = XrzSessionMetadata()
 
     # Track code from TRK block
     idx = dec.find(b"<hTRK ")
@@ -106,7 +106,7 @@ def _parse_metadata(dec: bytes) -> SessionMetadata:
     return meta
 
 
-def _parse_frames(dec: bytes, channels: dict[int, Channel]) -> None:
+def _parse_frames(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     """Parse (S frames and populate channel samples."""
     pos = 0
     end = len(dec)
@@ -165,16 +165,16 @@ _GPS_LONACC_ID = -8
 _GPS_DIST_ID = -9
 
 
-def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
+def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     """Parse GPS blocks and add lat/lon/speed as synthetic channels."""
     import math
 
-    lat_ch = Channel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
-    lon_ch = Channel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
-    speed_ch = Channel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
-    vn_ch = Channel(id=_GPS_VN_ID, short_name="GPSvN", long_name="GPS Velocity N")
-    ve_ch = Channel(id=_GPS_VE_ID, short_name="GPSvE", long_name="GPS Velocity E")
-    vd_ch = Channel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
+    lat_ch = XrzChannel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
+    lon_ch = XrzChannel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
+    speed_ch = XrzChannel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
+    vn_ch = XrzChannel(id=_GPS_VN_ID, short_name="GPSvN", long_name="GPS Velocity N")
+    ve_ch = XrzChannel(id=_GPS_VE_ID, short_name="GPSvE", long_name="GPS Velocity E")
+    vd_ch = XrzChannel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
 
     # Encoding (empirically determined from WCKC Chilliwack BC):
     # offset 0: timestamp (ms, session-local)
@@ -233,12 +233,12 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, Channel]) -> None:
         _compute_gps_distance(lat_ch, lon_ch, channels)
 
 
-def _compute_gps_acceleration(speed_ch: Channel, vn_ch: Channel, ve_ch: Channel,
-                              channels: dict[int, Channel]) -> None:
+def _compute_gps_acceleration(speed_ch: XrzChannel, vn_ch: XrzChannel, ve_ch: XrzChannel,
+                              channels: dict[int, XrzChannel]) -> None:
     """Compute GPS lateral/longitudinal acceleration from velocity components."""
     import math
-    lat_acc = Channel(id=_GPS_LATACC_ID, short_name="GPSLatG", long_name="GPS Lat Acc")
-    lon_acc = Channel(id=_GPS_LONACC_ID, short_name="GPSLonG", long_name="GPS Lon Acc")
+    lat_acc = XrzChannel(id=_GPS_LATACC_ID, short_name="GPSLatG", long_name="GPS Lat Acc")
+    lon_acc = XrzChannel(id=_GPS_LONACC_ID, short_name="GPSLonG", long_name="GPS Lon Acc")
 
     samples = list(zip(speed_ch.timestamps, speed_ch.values,
                        [v for v in vn_ch.values], [v for v in ve_ch.values]))
@@ -273,11 +273,11 @@ def _compute_gps_acceleration(speed_ch: Channel, vn_ch: Channel, ve_ch: Channel,
         channels[_GPS_LONACC_ID] = lon_acc
 
 
-def _compute_gps_distance(lat_ch: Channel, lon_ch: Channel,
-                           channels: dict[int, Channel]) -> None:
+def _compute_gps_distance(lat_ch: XrzChannel, lon_ch: XrzChannel,
+                           channels: dict[int, XrzChannel]) -> None:
     """Compute cumulative GPS distance in meters from session start."""
     import math
-    dist_ch = Channel(id=_GPS_DIST_ID, short_name="GPSDist", long_name="GPS Distance")
+    dist_ch = XrzChannel(id=_GPS_DIST_ID, short_name="GPSDist", long_name="GPS Distance")
     lats = lat_ch.values
     lons = lon_ch.values
     times = lat_ch.timestamps
@@ -292,7 +292,7 @@ def _compute_gps_distance(lat_ch: Channel, lon_ch: Channel,
     channels[_GPS_DIST_ID] = dist_ch
 
 
-def parse_xrz(path: Union[Path, str]) -> ParsedSession:
+def parse_xrz(path: Union[Path, str]) -> XrzSession:
     """Parse an XRZ file and return structured telemetry data."""
     raw = Path(path).read_bytes()
     dec = zlib.decompress(raw)
@@ -302,4 +302,4 @@ def parse_xrz(path: Union[Path, str]) -> ParsedSession:
     _parse_frames(dec, channels)
     _parse_gps_blocks(dec, channels)
 
-    return ParsedSession(metadata=metadata, channels=channels)
+    return XrzSession(metadata=metadata, channels=channels)

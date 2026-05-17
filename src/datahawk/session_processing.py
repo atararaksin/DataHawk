@@ -7,7 +7,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Optional
 
-from datahawk.xrz_parser import ParsedSession, Channel as XrzChannel
+from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
 from datahawk.lap_detection import detect_lap_boundaries
 
 
@@ -120,7 +120,7 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
     return values[lo] + frac * (values[hi] - values[lo])
 
 
-def process_session(parsed: ParsedSession) -> Session:
+def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
     crossings = detect_lap_boundaries(parsed)
 

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import struct
-from datahawk.xrz_parser import ParsedSession
+from datahawk.xrz_parser import XrzSession
 
 
-def detect_laps(parsed: ParsedSession) -> list[float]:
+def detect_laps(parsed: XrzSession) -> list[float]:
     """Detect lap times from a parsed XRZ session.
     
     Returns list of lap durations in seconds.
@@ -17,7 +17,7 @@ def detect_laps(parsed: ParsedSession) -> list[float]:
     return [boundaries[i+1] - boundaries[i] for i in range(len(boundaries) - 1)]
 
 
-def detect_lap_boundaries(parsed: ParsedSession) -> list[float]:
+def detect_lap_boundaries(parsed: XrzSession) -> list[float]:
     """Detect lap boundary timestamps from channel 4.
     
     Returns list of timestamps (seconds) marking each S/F crossing.
@@ -60,7 +60,7 @@ def detect_lap_boundaries(parsed: ParsedSession) -> list[float]:
     return best_chain
 
 
-def best_lap_time(parsed: ParsedSession) -> float | None:
+def best_lap_time(parsed: XrzSession) -> float | None:
     """Return the best (fastest) lap time in seconds, or None if no laps detected."""
     laps = detect_laps(parsed)
     return min(laps) if laps else None
