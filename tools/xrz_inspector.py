@@ -34,6 +34,8 @@ class XrzInspector(QMainWindow):
 
         self._lap_start_time: float | None = None
         self._rows: list[tuple[float, float, float, float]] = []
+        self._xs: list[float] = []
+        self._ys: list[float] = []
 
         splitter = QSplitter(Qt.Horizontal)
         self.setCentralWidget(splitter)
@@ -62,17 +64,18 @@ class XrzInspector(QMainWindow):
         left_layout.addWidget(self._table)
         splitter.addWidget(left)
 
-        # Right panel: map plot
+        # Right panel: map plot (Mercator-corrected)
         self._plot = pg.PlotWidget(title="GPS Track")
-        self._plot.setAspectLocked(True)
+        self._plot.getViewBox().setAspectLocked(True, ratio=1.0)
         self._plot.showGrid(x=True, y=True, alpha=0.3)
-        self._plot.setLabel("bottom", "Longitude")
-        self._plot.setLabel("left", "Latitude")
+        self._plot.setLabel("bottom", "X (m)")
+        self._plot.setLabel("left", "Y (m)")
+        self._plot.setMouseEnabled(x=True, y=True)  # zoom & pan
         self._trail = self._plot.plot([], [], pen=pg.mkPen("g", width=2))
         self._marker = self._plot.plot([], [], pen=None, symbol="o",
                                        symbolSize=12, symbolBrush="r")
         splitter.addWidget(self._plot)
-        splitter.setSizes([500, 900])
+        splitter.setSizes([400, 1000])
 
         if xrz_path:
             self._load_file(xrz_path)
@@ -113,11 +116,61 @@ class XrzInspector(QMainWindow):
             self._table.setItem(i, 2, QTableWidgetItem(f"{lon:.7f}"))
             self._table.setItem(i, 3, QTableWidgetItem(f"{spd:.1f}"))
 
-        # Draw trail
-        lons = [r[2] for r in self._rows]
-        lats = [r[1] for r in self._rows]
-        self._trail.setData(lons, lats)
-        self._plot.autoRange()
+        # Draw trail using ECEF->ENU projection for correct geometry
+        # XRZ GPS offsets 16/20/24 are ECEF X/Y/Z in centimeters (not lat/lon!)
+        import struct as _struct, zlib as _zlib
+        from pathlib import Path as _Path
+        raw_bytes = _Path(path).read_bytes()
+        dec_bytes = _zlib.decompress(raw_bytes)
+
+        ecef_points = []
+        _pos = 0
+        while True:
+            _idx = dec_bytes.find(b'<hGPS\x00', _pos)
+            if _idx == -1: break
+            _bs = _idx + 12
+            _x = _struct.unpack_from('<i', dec_bytes, _bs + 16)[0]
+            _y = _struct.unpack_from('<i', dec_bytes, _bs + 20)[0]
+            _z = _struct.unpack_from('<i', dec_bytes, _bs + 24)[0]
+            _r = math.sqrt(_x**2 + _y**2 + _z**2)
+            if 630000000 < _r < 650000000:
+                ecef_points.append((_x, _y, _z))
+            _pos = _idx + 12
+
+        # Reference point -> geodetic for rotation matrix
+        x0, y0, z0 = ecef_points[0]
+        _a = 6378137.0 * 100  # WGS84 semi-major in cm
+        _f = 1/298.257223563
+        _e2 = 2*_f - _f*_f
+        _lon0 = math.atan2(y0, x0)
+        _p = math.sqrt(x0**2 + y0**2)
+        _lat0 = math.atan2(z0, _p * (1 - _e2))
+        for _ in range(10):
+            _N = _a / math.sqrt(1 - _e2 * math.sin(_lat0)**2)
+            _lat0 = math.atan2(z0 + _e2 * _N * math.sin(_lat0), _p)
+
+        _sl, _cl = math.sin(_lat0), math.cos(_lat0)
+        _sn, _cn = math.sin(_lon0), math.cos(_lon0)
+
+        self._xs = []
+        self._ys = []
+        for (x, y, z) in ecef_points:
+            dx = (x - x0) / 100.0
+            dy = (y - y0) / 100.0
+            dz = (z - z0) / 100.0
+            self._xs.append(-_sn * dx + _cn * dy)          # East
+            self._ys.append(-_sl*_cn*dx - _sl*_sn*dy + _cl*dz)  # North
+        self._trail.setData(self._xs, self._ys)
+        # Force equal scaling: make both axes span the same range
+        x_min, x_max = min(self._xs), max(self._xs)
+        y_min, y_max = min(self._ys), max(self._ys)
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+        max_range = max(x_range, y_range) * 1.1
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
+        self._plot.setXRange(x_center - max_range/2, x_center + max_range/2)
+        self._plot.setYRange(y_center - max_range/2, y_center + max_range/2)
 
         self._table.selectRow(0)
 
@@ -135,7 +188,7 @@ class XrzInspector(QMainWindow):
         t, lat, lon, spd = self._rows[row]
 
         # Update marker
-        self._marker.setData([lon], [lat])
+        self._marker.setData([self._xs[row]], [self._ys[row]])
 
         # Update lap time
         if self._lap_start_time is not None:

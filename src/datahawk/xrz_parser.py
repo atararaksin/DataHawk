@@ -2,11 +2,32 @@
 
 from __future__ import annotations
 
+import math
 import struct
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
+
+
+# WGS84 ellipsoid constants
+_WGS84_A = 6_378_137.0  # semi-major axis (m)
+_WGS84_B = 6_356_752.314245  # semi-minor axis (m)
+_WGS84_E2 = 1 - (_WGS84_B ** 2) / (_WGS84_A ** 2)  # first eccentricity squared
+
+
+def _ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float]:
+    """Convert ECEF (meters) to geodetic lat/lon (degrees) using Bowring's method."""
+    lon = math.degrees(math.atan2(y_m, x_m))
+    p = math.hypot(x_m, y_m)
+    # Initial estimate of latitude (Bowring)
+    theta = math.atan2(z_m * _WGS84_A, p * _WGS84_B)
+    lat = math.atan2(
+        z_m + _WGS84_E2 * _WGS84_A ** 2 / _WGS84_B * math.sin(theta) ** 3,
+        p - _WGS84_E2 * _WGS84_A * math.cos(theta) ** 3,
+    )
+    lat = math.degrees(lat)
+    return lat, lon
 
 
 @dataclass
@@ -180,8 +201,6 @@ _GPS_HEADING_ID = -10
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     """Parse GPS blocks and add lat/lon/speed as synthetic channels."""
-    import math
-
     lat_ch = XrzChannel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
     lon_ch = XrzChannel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
     speed_ch = XrzChannel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
@@ -190,14 +209,14 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
     vd_ch = XrzChannel(id=_GPS_VD_ID, short_name="GPSvD", long_name="GPS Velocity D")
     heading_ch = XrzChannel(id=_GPS_HEADING_ID, short_name="GPSHdg", long_name="GPS Heading")
 
-    # Encoding (empirically determined from WCKC Chilliwack BC):
+    # Encoding (confirmed ECEF Earth-Centered Earth-Fixed):
     # offset 0: timestamp (ms, session-local)
-    # offset 20: longitude (raw / 2905385 = degrees)
-    # offset 24: latitude (raw / 9768000 = degrees)
-    # offset 32: velocity N component (cm/s, signed)
-    # offset 36: velocity E component (cm/s, signed)
-    LON_FACTOR = 2905385.0
-    LAT_FACTOR = 9768000.0
+    # offset 16: ECEF X (centimeters, signed int32)
+    # offset 20: ECEF Y (centimeters, signed int32)
+    # offset 24: ECEF Z (centimeters, signed int32)
+    # offset 32: velocity component 1 (cm/s, signed)
+    # offset 36: velocity component 2 (cm/s, signed)
+    # offset 40: velocity component 3 (cm/s, signed)
 
     pos = 0
     while True:
@@ -209,10 +228,13 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
             break
 
         ts_sec = struct.unpack_from("<I", dec, bs)[0] / 1000.0
-        lon = struct.unpack_from("<i", dec, bs + 20)[0] / LON_FACTOR
-        lat = struct.unpack_from("<i", dec, bs + 24)[0] / LAT_FACTOR
+        ecef_x = struct.unpack_from("<i", dec, bs + 16)[0] / 100.0  # cm -> m
+        ecef_y = struct.unpack_from("<i", dec, bs + 20)[0] / 100.0
+        ecef_z = struct.unpack_from("<i", dec, bs + 24)[0] / 100.0
 
         pos = idx + 12
+
+        lat, lon = _ecef_to_geodetic(ecef_x, ecef_y, ecef_z)
 
         if abs(lat) < 1.0 or abs(lon) < 1.0:
             continue
@@ -255,43 +277,38 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, XrzChannel]) -> None:
         channels[_GPS_VD_ID] = vd_ch
         channels[_GPS_HEADING_ID] = heading_ch
 
-        # Compute lateral and longitudinal acceleration from velocity
-        _compute_gps_acceleration(speed_ch, vn_ch, ve_ch, channels)
+        # Compute lateral and longitudinal acceleration from speed + heading
+        _compute_gps_acceleration(speed_ch, heading_ch, channels)
 
         # Compute cumulative distance from lat/lon
         _compute_gps_distance(lat_ch, lon_ch, channels)
 
 
-def _compute_gps_acceleration(speed_ch: XrzChannel, vn_ch: XrzChannel, ve_ch: XrzChannel,
+def _compute_gps_acceleration(speed_ch: XrzChannel, heading_ch: XrzChannel,
                               channels: dict[int, XrzChannel]) -> None:
-    """Compute GPS lateral/longitudinal acceleration from velocity components."""
-    import math
+    """Compute GPS lateral/longitudinal acceleration from speed and heading."""
     lat_acc = XrzChannel(id=_GPS_LATACC_ID, short_name="GPSLatG", long_name="GPS Lat Acc")
     lon_acc = XrzChannel(id=_GPS_LONACC_ID, short_name="GPSLonG", long_name="GPS Lon Acc")
 
-    samples = list(zip(speed_ch.timestamps, speed_ch.values,
-                       [v for v in vn_ch.values], [v for v in ve_ch.values]))
     N = 5  # smoothing half-window
-    for i in range(N, len(samples) - N):
-        t_i = samples[i][0]
-        dt = samples[i + N][0] - samples[i - N][0]
+    for i in range(N, len(speed_ch.timestamps) - N):
+        t_i = speed_ch.timestamps[i]
+        dt = speed_ch.timestamps[i + N] - speed_ch.timestamps[i - N]
         if dt <= 0:
             continue
-        spd_ms = samples[i][1] / 3.6
-        # Heading from velocity components (already in km/h, convert to m/s)
-        vn_now = samples[i][2] / 3.6
-        ve_now = samples[i][2] / 3.6
-        h0 = math.atan2(samples[i - N][3] / 3.6, samples[i - N][2] / 3.6)
-        h1 = math.atan2(samples[i + N][3] / 3.6, samples[i + N][2] / 3.6)
-        dh = h1 - h0
+
+        # Longitudinal = dSpeed/dt
+        ds = (speed_ch.values[i + N] - speed_ch.values[i - N]) / 3.6
+        lon_g = (ds / dt) / 9.81
+
+        # Lateral = speed * dHeading/dt (heading from position channel)
+        h0 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i - N])
+        h1 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i + N])
+        dh = math.radians(h1) - math.radians(h0)
         if dh > math.pi: dh -= 2 * math.pi
         if dh < -math.pi: dh += 2 * math.pi
 
-        # Longitudinal = dSpeed/dt
-        ds = (samples[i + N][1] - samples[i - N][1]) / 3.6
-        lon_g = (ds / dt) / 9.81
-
-        # Lateral = speed * dHeading/dt
+        spd_ms = speed_ch.values[i] / 3.6
         lat_g = (spd_ms * dh / dt) / 9.81
 
         lat_acc.append(t_i, lat_g)
@@ -305,7 +322,6 @@ def _compute_gps_acceleration(speed_ch: XrzChannel, vn_ch: XrzChannel, ve_ch: Xr
 def _compute_gps_distance(lat_ch: XrzChannel, lon_ch: XrzChannel,
                            channels: dict[int, XrzChannel]) -> None:
     """Compute cumulative GPS distance in meters from session start."""
-    import math
     dist_ch = XrzChannel(id=_GPS_DIST_ID, short_name="GPSDist", long_name="GPS Distance")
     lats = lat_ch.values
     lons = lon_ch.values
