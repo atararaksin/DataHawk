@@ -71,6 +71,7 @@ class SessionViewer(QMainWindow):
         self._plot = pg.PlotWidget()
         self._plot.setLabel("bottom", "Time", units="s")
         self._plot.showGrid(x=True, y=True, alpha=0.3)
+        self._plot.scene().sigMouseClicked.connect(self._on_plot_click)
         left_layout.addWidget(self._plot)
 
         # Cursor line on plot
@@ -130,7 +131,7 @@ class SessionViewer(QMainWindow):
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
-        self._table.selectionModel().selectionChanged.connect(self._update_plot)
+        self._table.selectionModel().selectionChanged.connect(self._on_lap_selected)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
         self._player.durationChanged.connect(self._on_duration)
@@ -234,6 +235,62 @@ class SessionViewer(QMainWindow):
         self._cursor.setVisible(True)
         self._cursor.setPos(cursor_x)
 
+    def get_current_session_time(self) -> float:
+        """Get the current session time based on cursor position."""
+        lap = self._session.laps[self._active_lap_idx]
+        cursor_x = self._cursor.value() if self._cursor.isVisible() else 0
+        return lap.lap_start_time + cursor_x
+
+    def get_sample_index_for_session_time(self, session_time: float) -> int:
+        """Get the reindexed sample index for a given session time using the temporal index."""
+        start = self._session.laps[0].lap_start_time
+        idx = int((session_time - start) / self._session.time_resolution)
+        if idx < 0:
+            return 0
+        if idx >= len(self._session.temporal_index):
+            return self._session.temporal_index[-1].sample_index if self._session.temporal_index else 0
+        return self._session.temporal_index[idx].sample_index
+
+    def jump_video_to_time(self, session_time: float):
+        """Seek video to match a given session time."""
+        video_s = session_time + self._video_offset
+        self._player.setPosition(int(video_s * 1000))
+
+    def jump_to_lap(self, lap_idx: int):
+        """Jump to target lap at the same spatial position as current cursor."""
+        if lap_idx == self._active_lap_idx:
+            return
+        if lap_idx < 0 or lap_idx >= len(self._session.laps):
+            return
+
+        # Find spatial position (sample index) at current cursor
+        sample_idx = self.get_sample_index_for_session_time(self.get_current_session_time())
+
+        # Look up the same spatial position in target lap's Master Clk
+        target_lap = self._session.laps[lap_idx]
+        target_mc = target_lap.channels.get("Master Clk")
+        if target_mc and sample_idx < len(target_mc.samples):
+            t = target_mc.samples[sample_idx]
+            if t is not None and t == t:  # not NaN
+                session_time = t
+            else:
+                session_time = target_lap.lap_start_time
+        else:
+            session_time = target_lap.lap_start_time
+
+        self.jump_to_time(session_time)
+        self.jump_video_to_time(session_time)
+
+    def _on_plot_click(self, event):
+        """Handle click on the plot to seek to that time."""
+        pos = event.scenePos()
+        if not self._plot.sceneBoundingRect().contains(pos):
+            return
+        mouse_point = self._plot.plotItem.vb.mapSceneToView(pos)
+        session_time = self._session.laps[self._active_lap_idx].lap_start_time + mouse_point.x()
+        self.jump_to_time(session_time)
+        self.jump_video_to_time(session_time)
+
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
         if not self._session.laps:
@@ -244,6 +301,17 @@ class SessionViewer(QMainWindow):
         session_time = video_s - self._video_offset
         self.jump_to_time(session_time)
 
+    def _on_lap_selected(self, *_args):
+        """Handle user clicking a lap in the table."""
+        rows = self._table.selectionModel().selectedRows()
+        if not rows:
+            return
+        lap_idx = rows[0].row()
+        if lap_idx != self._active_lap_idx:
+            self.jump_to_lap(lap_idx)
+        else:
+            self._update_plot()
+
     def closeEvent(self, event):
         self._sync_timer.stop()
         self._player.stop()
@@ -253,11 +321,9 @@ class SessionViewer(QMainWindow):
         self._plot.clear()
         self._plot.addItem(self._cursor)
 
-        rows = self._table.selectionModel().selectedRows()
-        if not rows or not self._channel_names:
+        if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
 
-        self._active_lap_idx = rows[0].row()
         lap_idx = self._active_lap_idx
         ch_name = self._channel_names[self._combo.currentIndex()]
         lap = self._session.laps[lap_idx]

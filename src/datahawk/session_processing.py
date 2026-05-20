@@ -249,36 +249,46 @@ def process_session(parsed: XrzSession) -> Session:
 
 
 def _build_temporal_index(session: Session) -> list[TemporalIndexEntry]:
-    """Build time-to-position mapping using reindexed Master Clk values."""
+    """Build time-to-position mapping starting at session start time.
+
+    Advances through laps at time_resolution increments. For each time step,
+    finds the current lap and the latest valid reindexed sample index.
+    When reindexed data has gaps (NaN), the sample index freezes until
+    valid data resumes.
+    """
     if not session.laps or session.samples_per_lap == 0:
         return []
-    if "Master Clk" not in session.laps[0].channels:
-        return []
 
-    time_resolution = 0.04  # 25Hz
-
-    # Build flat sequence of (time, lap_index, sample_index)
-    flat: list[tuple[float, int, int]] = []
-    for lap in session.laps:
-        mc = lap.channels["Master Clk"]
-        for si, t in enumerate(mc.samples):
-            if t is not None and not math.isnan(t):
-                flat.append((t, lap.lap_index, si))
-
-    if not flat:
-        return []
-
-    start = flat[0][0]
-    end = flat[-1][0]
+    time_resolution = session.time_resolution
+    start = session.laps[0].lap_start_time
+    end = session.laps[-1].lap_start_time + session.laps[-1].lap_time
     n_steps = int((end - start) / time_resolution)
 
     index: list[TemporalIndexEntry] = []
-    ptr = 0
+    current_lap_idx = 0
+    current_sample_idx = 0
+
     for step in range(n_steps):
         t = start + step * time_resolution
-        while ptr < len(flat) - 1 and flat[ptr][0] < t:
-            ptr += 1
-        _, lap_idx, sample_idx = flat[ptr]
-        index.append(TemporalIndexEntry(lap_index=lap_idx, sample_index=sample_idx))
+
+        # Advance lap if needed
+        while (current_lap_idx < len(session.laps) - 1 and
+               t >= session.laps[current_lap_idx + 1].lap_start_time):
+            current_lap_idx += 1
+            current_sample_idx = 0
+
+        # Advance sample index within current lap's reindexed Master Clk
+        lap = session.laps[current_lap_idx]
+        mc = lap.channels.get("Master Clk")
+        if mc:
+            # Advance pointer to latest valid sample <= t
+            while (current_sample_idx < len(mc.samples) - 1):
+                next_val = mc.samples[current_sample_idx + 1]
+                if next_val is not None and next_val == next_val and next_val <= t:
+                    current_sample_idx += 1
+                else:
+                    break
+
+        index.append(TemporalIndexEntry(lap_index=current_lap_idx, sample_index=current_sample_idx))
 
     return index
