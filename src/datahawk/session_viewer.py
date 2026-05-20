@@ -127,6 +127,8 @@ class SessionViewer(QMainWindow):
             for name in sorted(self._session.laps[0].channels.keys()):
                 self._combo.addItem(name)
                 self._channel_names.append(name)
+            if "GPS Speed" in self._channel_names:
+                self._combo.setCurrentIndex(self._channel_names.index("GPS Speed"))
 
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
@@ -138,13 +140,14 @@ class SessionViewer(QMainWindow):
         self._player.positionChanged.connect(self._on_position)
         self._video_slider.sliderMoved.connect(self._seek_video)
 
-        # Sync timer: update cursor from video position at 25Hz
+        # Sync timer: update cursor from video position at 50Hz
         self._sync_timer = QTimer()
-        self._sync_timer.setInterval(40)  # 25Hz
+        self._sync_timer.setInterval(20)  # 50Hz
         self._sync_timer.timeout.connect(self._sync_cursor)
 
         # Select first lap
         self._active_lap_idx = 0
+        self._current_session_time = 0.0
         if self._session.laps:
             self._table.selectRow(0)
 
@@ -214,6 +217,8 @@ class SessionViewer(QMainWindow):
         if not self._session.laps:
             return
 
+        self._current_session_time = session_time
+
         # Find active lap by comparing against lap start times
         lap_idx = 0
         for i, lap in enumerate(self._session.laps):
@@ -234,12 +239,6 @@ class SessionViewer(QMainWindow):
         cursor_x = session_time - self._session.laps[lap_idx].lap_start_time
         self._cursor.setVisible(True)
         self._cursor.setPos(cursor_x)
-
-    def get_current_session_time(self) -> float:
-        """Get the current session time based on cursor position."""
-        lap = self._session.laps[self._active_lap_idx]
-        cursor_x = self._cursor.value() if self._cursor.isVisible() else 0
-        return lap.lap_start_time + cursor_x
 
     def get_sample_index_for_session_time(self, session_time: float) -> int:
         """Get the reindexed sample index for a given session time using the temporal index."""
@@ -264,7 +263,7 @@ class SessionViewer(QMainWindow):
             return
 
         # Find spatial position (sample index) at current cursor
-        sample_idx = self.get_sample_index_for_session_time(self.get_current_session_time())
+        sample_idx = self.get_sample_index_for_session_time(self._current_session_time)
 
         # Look up the same spatial position in target lap's Master Clk
         target_lap = self._session.laps[lap_idx]
