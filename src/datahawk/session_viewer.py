@@ -143,6 +143,7 @@ class SessionViewer(QMainWindow):
         self._sync_timer.timeout.connect(self._sync_cursor)
 
         # Select first lap
+        self._active_lap_idx = 0
         if self._session.laps:
             self._table.selectRow(0)
 
@@ -207,47 +208,46 @@ class SessionViewer(QMainWindow):
     def _seek_video(self, ms):
         self._player.setPosition(ms)
 
+    def jump_to_time(self, session_time: float):
+        """Jump to a given session time: select the active lap and place the cursor."""
+        if not self._session.laps:
+            return
+
+        # Find active lap by comparing against lap start times
+        lap_idx = 0
+        for i, lap in enumerate(self._session.laps):
+            if session_time >= lap.lap_start_time:
+                lap_idx = i
+            else:
+                break
+
+        # Select lap if changed
+        if lap_idx != self._active_lap_idx:
+            self._table.selectionModel().blockSignals(True)
+            self._table.selectRow(lap_idx)
+            self._table.selectionModel().blockSignals(False)
+            self._active_lap_idx = lap_idx
+            self._update_plot()
+
+        # Position cursor: X axis is time relative to lap start
+        cursor_x = session_time - self._session.laps[lap_idx].lap_start_time
+        self._cursor.setVisible(True)
+        self._cursor.setPos(cursor_x)
+
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
-        if not self._session.temporal_index:
+        if not self._session.laps:
             return
 
         video_ms = self._player.position()
         video_s = video_ms / 1000.0
         session_time = video_s - self._video_offset
+        self.jump_to_time(session_time)
 
-        if not self._session.laps:
-            return
-
-        first_mc = self._session.laps[0].channels.get("Master Clk")
-        if not first_mc or not first_mc.samples:
-            return
-        t_start = first_mc.samples[0] or 0
-
-        idx = int((session_time - t_start) / 0.04)
-        if idx < 0 or idx >= len(self._session.temporal_index):
-            self._cursor.setVisible(False)
-            return
-
-        self._cursor.setVisible(True)
-        entry = self._session.temporal_index[idx]
-
-        # Switch lap only when it actually changes
-        current_rows = self._table.selectionModel().selectedRows()
-        current_lap = current_rows[0].row() if current_rows else -1
-        if entry.lap_index != current_lap:
-            self._table.selectionModel().blockSignals(True)
-            self._table.selectRow(entry.lap_index)
-            self._table.selectionModel().blockSignals(False)
-            self._update_plot()
-
-        # Position cursor
-        lap = self._session.laps[entry.lap_index]
-        mc = lap.channels.get("Master Clk")
-        if mc and entry.sample_index < len(mc.samples):
-            t0 = mc.samples[0] or 0
-            cursor_x = (mc.samples[entry.sample_index] or 0) - t0
-            self._cursor.setPos(cursor_x)
+    def closeEvent(self, event):
+        self._sync_timer.stop()
+        self._player.stop()
+        super().closeEvent(event)
 
     def _update_plot(self, *_args):
         self._plot.clear()
@@ -257,7 +257,8 @@ class SessionViewer(QMainWindow):
         if not rows or not self._channel_names:
             return
 
-        lap_idx = rows[0].row()
+        self._active_lap_idx = rows[0].row()
+        lap_idx = self._active_lap_idx
         ch_name = self._channel_names[self._combo.currentIndex()]
         lap = self._session.laps[lap_idx]
 
