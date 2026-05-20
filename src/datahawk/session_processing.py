@@ -281,10 +281,16 @@ def _build_temporal_index(session: Session) -> list[TemporalIndexEntry]:
         lap = session.laps[current_lap_idx]
         mc = lap.channels.get("Master Clk")
         if mc:
-            # Advance pointer to latest valid sample <= t
+            # Advance pointer to the sample closest to t
             while (current_sample_idx < len(mc.samples) - 1):
                 next_val = mc.samples[current_sample_idx + 1]
-                if next_val is not None and next_val == next_val and next_val <= t:
+                if next_val is None or math.isnan(next_val):
+                    break
+                cur_val = mc.samples[current_sample_idx]
+                if cur_val is None or math.isnan(cur_val):
+                    current_sample_idx += 1
+                elif abs(next_val - t) <= abs(cur_val - t):
+                    current_sample_idx += 1
                     current_sample_idx += 1
                 else:
                     break
