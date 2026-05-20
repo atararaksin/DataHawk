@@ -104,13 +104,22 @@ def process_session(parsed: XrzSession) -> Session:
             best_lap_time=0.0,
         )
 
-    # Find fastest lap
-    lap_times = [crossings[i+1] - crossings[i] for i in range(len(crossings)-1)]
-    fastest_idx = min(range(len(lap_times)), key=lambda i: lap_times[i])
+    # Build full boundary list: session_start, crossings..., session_end
+    mclk_ch = parsed.channels.get(0)
+    session_start_time = mclk_ch.timestamps[0] if mclk_ch and mclk_ch.timestamps else crossings[0]
+    session_end_time = mclk_ch.timestamps[-1] if mclk_ch and mclk_ch.timestamps else crossings[-1]
+    boundaries = [session_start_time] + list(crossings) + [session_end_time]
+
+    # Compute lap times for all laps (including out-lap and in-lap)
+    lap_times = [boundaries[i+1] - boundaries[i] for i in range(len(boundaries)-1)]
+
+    # Fastest lap: exclude first (out-lap) and last (in-lap)
+    full_lap_range = range(1, len(lap_times) - 1)
+    fastest_idx = min(full_lap_range, key=lambda i: lap_times[i])
 
     # Reference lap: use GPS at 25Hz
-    ref_start = crossings[fastest_idx]
-    ref_end = crossings[fastest_idx + 1]
+    ref_start = boundaries[fastest_idx]
+    ref_end = boundaries[fastest_idx + 1]
     gps_times = lat_ch.timestamps
     gps_lats = lat_ch.values
     gps_lons = lon_ch.values
@@ -151,14 +160,14 @@ def process_session(parsed: XrzSession) -> Session:
         best_lap_time=lap_times[fastest_idx],
     )
 
-    for lap_idx in range(len(crossings) - 1):
-        lap_start_time = crossings[lap_idx]
-        lap_end = crossings[lap_idx + 1]
+    for lap_idx in range(len(boundaries) - 1):
+        lap_start_time = boundaries[lap_idx]
+        lap_end = boundaries[lap_idx + 1]
         lap_time = lap_end - lap_start_time
 
-        lap = Lap(lap_index=lap_idx, lap_time=lap_time, lap_start_time=lap_start_time)
+        lap = Lap(lap_index=len(session.laps), lap_time=lap_time, lap_start_time=lap_start_time)
 
-        if lap_idx == fastest_idx:
+        if lap_start_time == ref_start:
             # Reference lap: time-based interpolation (uniform time samples)
             for ch_id, ch_name in channel_names.items():
                 ch = parsed.channels[ch_id]
@@ -176,7 +185,7 @@ def process_session(parsed: XrzSession) -> Session:
                     raw_values=list(ch_vals),
                 )
         else:
-            # Other laps: perpendicular intersection reindexing
+            # Other laps: spatial reindexing
             # For each ref sample, find where current lap crosses the perpendicular
             # line through that ref point (normal to ref trajectory)
             lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
@@ -204,9 +213,7 @@ def process_session(parsed: XrzSession) -> Session:
             # Find interpolation fractions: for each ref sample, where does
             # current lap cross the perpendicular line?
             MAX_RADIUS = 8.0  # meters
-            fracs = _find_nearest_points(
-                ref_x, ref_y, lap_x, lap_y, MAX_RADIUS
-            )
+            fracs = _find_nearest_points(ref_x, ref_y, lap_x, lap_y, MAX_RADIUS)
 
             # Interpolate all channels using the crossing fractions
             for ch_id, ch_name in channel_names.items():
