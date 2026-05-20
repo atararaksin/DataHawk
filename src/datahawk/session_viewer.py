@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import isnan
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -240,15 +241,51 @@ class SessionViewer(QMainWindow):
         self._cursor.setVisible(True)
         self._cursor.setPos(cursor_x)
 
-    def get_sample_index_for_session_time(self, session_time: float) -> int:
-        """Get the reindexed sample index for a given session time using the temporal index."""
+    def get_channel_value_in_target_lap_with_interpolation(
+        self, session_time: float, target_lap_idx: int, channel_name: str
+    ) -> float:
+        """Get interpolated channel value at a spatial position in target lap.
+
+        Uses the temporal index to find the sample index for session_time,
+        computes fractional position between samples, then interpolates
+        the channel value in the target lap at that same spatial position.
+        """
         start = self._session.laps[0].lap_start_time
-        idx = int((session_time - start) / self._session.time_resolution)
+        res = self._session.time_resolution
+        idx = int((session_time - start) / res)
         if idx < 0:
-            return 0
+            idx = 0
         if idx >= len(self._session.temporal_index):
-            return self._session.temporal_index[-1].sample_index if self._session.temporal_index else 0
-        return self._session.temporal_index[idx].sample_index
+            idx = len(self._session.temporal_index) - 1
+
+        sample_idx = self._session.temporal_index[idx].sample_index
+
+        # Fractional position: where session_time falls between idx and idx+1
+        frac = 0.0
+        idx_time = start + idx * res
+        frac = (session_time - idx_time) / res
+        frac = max(0.0, min(1.0, frac))
+
+        # Check if next temporal index entry has a different sample_idx
+        # If so, interpolate between them in the target channel
+        next_sample_idx = sample_idx
+        if idx + 1 < len(self._session.temporal_index):
+            next_sample_idx = self._session.temporal_index[idx + 1].sample_index
+
+        target_lap = self._session.laps[target_lap_idx]
+        ch = target_lap.channels.get(channel_name)
+        if not ch or sample_idx >= len(ch.samples):
+            return float('nan')
+
+        v0 = ch.samples[sample_idx]
+        if v0 is None or isnan(v0):
+            return float('nan')
+
+        if next_sample_idx != sample_idx and next_sample_idx < len(ch.samples):
+            v1 = ch.samples[next_sample_idx]
+            if v1 is not None and not isnan(v1):
+                return v0 + frac * (v1 - v0)
+        return v0
 
     def jump_video_to_time(self, session_time: float):
         """Seek video to match a given session time."""
@@ -262,20 +299,12 @@ class SessionViewer(QMainWindow):
         if lap_idx < 0 or lap_idx >= len(self._session.laps):
             return
 
-        # Find spatial position (sample index) at current cursor
-        sample_idx = self.get_sample_index_for_session_time(self._current_session_time)
-
-        # Look up the same spatial position in target lap's Master Clk
-        target_lap = self._session.laps[lap_idx]
-        target_mc = target_lap.channels.get("Master Clk")
-        if target_mc and sample_idx < len(target_mc.samples):
-            t = target_mc.samples[sample_idx]
-            if t is not None and t == t:  # not NaN
-                session_time = t
-            else:
-                session_time = target_lap.lap_start_time
-        else:
-            session_time = target_lap.lap_start_time
+        # Find interpolated session time at the same spatial position in target lap
+        session_time = self.get_channel_value_in_target_lap_with_interpolation(
+            self._current_session_time, lap_idx, "Master Clk"
+        )
+        if session_time != session_time:  # NaN
+            session_time = self._session.laps[lap_idx].lap_start_time
 
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
@@ -350,7 +379,7 @@ class SessionViewer(QMainWindow):
                     ref_times = []
                     ref_samples = []
                     for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
-                        if t == t and v == v:  # skip NaN
+                        if not isnan(t) and not isnan(v):  # skip NaN
                             ref_times.append(t - t0)
                             ref_samples.append(v)
                     if ref_times:
