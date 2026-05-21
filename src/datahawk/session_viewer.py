@@ -303,8 +303,8 @@ class SessionViewer(QMainWindow):
 
         # Get reference lap's lat/lon/heading at this spatial position
         ref_lap = self._session.laps[self._session.reference_lap_index]
-        lat_ch = ref_lap.channels.get("GPS Lat")
-        lon_ch = ref_lap.channels.get("GPS Lon")
+        lat_ch = ref_lap.channels.get("GPS Latitude")
+        lon_ch = ref_lap.channels.get("GPS Longitude")
         heading_ch = ref_lap.channels.get("GPS Heading")
 
         if not (lat_ch and lon_ch and heading_ch):
