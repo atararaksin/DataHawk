@@ -5,8 +5,7 @@ from __future__ import annotations
 from datahawk.xrz_parser import XrzSession, _GPS_LAT_ID, _GPS_LON_ID, _GPS_HEADING_ID
 from datahawk.types import Line, Point
 from datahawk.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
-
-_CROSSING_LINE_LENGTH = 8.0  # meters
+from datahawk.constants import CROSSING_LINE_LENGTH
 
 
 def get_sf_timestamps_based_on_ch4(session: XrzSession) -> list[float]:
@@ -44,7 +43,7 @@ def detect_start_finish_fine(session: XrzSession) -> Line:
         lat = lat_ch.get_value_at_time_with_interpolation(t)
         lon = lon_ch.get_value_at_time_with_interpolation(t)
         heading = heading_ch.get_value_at_time_with_interpolation(t)
-        lines.append(create_perpendecular_line(Point(lat, lon), heading, _CROSSING_LINE_LENGTH))
+        lines.append(create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH))
 
     if not lines:
         raise ValueError("Couldn't detect start/finish line")
