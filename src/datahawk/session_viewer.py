@@ -409,6 +409,9 @@ class SessionViewer(QMainWindow):
                         self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
 
         # Sector split lines
+        s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine),
+                                  label="S1", labelOpts={"position": 0.95, "color": "w"})
+        self._plot.addItem(s1_line)
         for i, split_time in enumerate(lap.sector_split_times):
             if not math.isnan(split_time):
                 x = split_time - lap.lap_start_time
