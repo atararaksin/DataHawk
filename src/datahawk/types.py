@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
 class Channel:
     """A reindexed channel with fixed sample count per lap."""
     name: str
-    samples: list[Optional[float]]  # NaN for missing data
+    samples: list[float]  # NaN for missing data
     raw_timestamps: list[float] = field(default_factory=list, repr=False)
     raw_values: list[float] = field(default_factory=list, repr=False)
 

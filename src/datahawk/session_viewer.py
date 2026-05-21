@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -275,7 +276,7 @@ class SessionViewer(QMainWindow):
         target_mc = target_lap.channels.get("Master Clk")
         if target_mc and sample_idx < len(target_mc.samples):
             t = target_mc.samples[sample_idx]
-            if t is not None and t == t:  # not NaN
+            if not math.isnan(t):
                 session_time = t
             else:
                 session_time = target_lap.lap_start_time
@@ -297,8 +298,6 @@ class SessionViewer(QMainWindow):
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
-        import math
-
         session_time = self._current_session_time
         sample_idx = self.get_sample_index_for_session_time(session_time)
 
@@ -316,9 +315,6 @@ class SessionViewer(QMainWindow):
         lon = lon_ch.samples[sample_idx]
         heading = heading_ch.samples[sample_idx]
 
-        if lat is None or lon is None or heading is None:
-            QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
-            return
         if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
             QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
             return
