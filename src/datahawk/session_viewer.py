@@ -409,23 +409,11 @@ class SessionViewer(QMainWindow):
                         self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
 
         # Sector split lines
-        # S1 is always at lap start (x=0)
-        sector_labels: list[tuple[pg.TextItem, float]] = []
-        s1_label = pg.TextItem("S1", color="w", anchor=(0, 1.0))
-        self._plot.addItem(s1_label)
-        sector_labels.append((s1_label, 0))
         for i, split_time in enumerate(lap.sector_split_times):
             if not math.isnan(split_time):
                 x = split_time - lap.lap_start_time
-                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine))
+                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine),
+                                       label=f"S{i+2}", labelOpts={"position": 0.95, "color": "w"})
                 self._plot.addItem(line)
-                label = pg.TextItem(f"S{i+2}", color="w", anchor=(0, 1.0))
-                self._plot.addItem(label)
-                sector_labels.append((label, x))
 
         self._plot.enableAutoRange()
-
-        # Position sector labels at top of Y range after autorange
-        y_top = self._plot.viewRange()[1][1]
-        for label, x in sector_labels:
-            label.setPos(x, y_top)
