@@ -20,6 +20,7 @@ from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
+from datahawk.sector_detection import populate_sector_times
 
 
 class SessionViewer(QMainWindow):
@@ -27,6 +28,7 @@ class SessionViewer(QMainWindow):
         super().__init__(parent)
         parsed = parse_xrz(xrz_path)
         self._session: Session = process_session(parsed)
+        populate_sector_times(self._session)
         self._xrz_path = xrz_path
         self._video_offset: float = 0.0  # video_time = session_time + offset
 
@@ -44,15 +46,11 @@ class SessionViewer(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         # Laps table
-        self._table = QTableWidget(len(self._session.laps), 2)
-        self._table.setHorizontalHeaderLabels(["Lap", "Time"])
+        self._table = QTableWidget()
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
         self._table.setMaximumHeight(200)
-        for i, lap in enumerate(self._session.laps):
-            self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.3f}s"))
-        self._table.resizeColumnsToContents()
+        self._rebuild_lap_table()
         left_layout.addWidget(self._table)
 
         # Channel selector and reference lap
@@ -156,6 +154,24 @@ class SessionViewer(QMainWindow):
         self._current_session_time = 0.0
         if self._session.laps:
             self._table.selectRow(0)
+
+
+    def _rebuild_lap_table(self):
+        """Rebuild the laps table with current sector columns."""
+        self._table.blockSignals(True)
+        n_sectors = len(self._session.laps[0].sector_times) if self._session.laps else 0
+        headers = ["Lap", "Time"] + [f"S{i+1}" for i in range(n_sectors)]
+        self._table.setColumnCount(len(headers))
+        self._table.setRowCount(len(self._session.laps))
+        self._table.setHorizontalHeaderLabels(headers)
+        for i, lap in enumerate(self._session.laps):
+            self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.3f}s"))
+            for s, st in enumerate(lap.sector_times):
+                text = f"{st:.3f}s" if not math.isnan(st) else "—"
+                self._table.setItem(i, 2 + s, QTableWidgetItem(text))
+        self._table.resizeColumnsToContents()
+        self._table.blockSignals(False)
 
     def _load_video(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -321,6 +337,8 @@ class SessionViewer(QMainWindow):
 
         split_line = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
         self._session.track.sector_split_lines.append(split_line)
+        populate_sector_times(self._session)
+        self._rebuild_lap_table()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _sync_cursor(self):
