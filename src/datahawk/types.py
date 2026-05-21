@@ -27,6 +27,7 @@ class Lap:
 class Track:
     name: str
     sf_line: Line
+    sector_split_lines: list[Line] = field(default_factory=list)
 
 @dataclass
 class TemporalIndexEntry:

@@ -8,7 +8,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
-    QPushButton, QFileDialog, QSlider,
+    QPushButton, QFileDialog, QSlider, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -16,7 +16,9 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.xrz_parser import parse_xrz
 from datahawk.session_processing import process_session
-from datahawk.types import Session
+from datahawk.types import Session, Point
+from datahawk.gps_utils import create_perpendecular_line
+from datahawk.constants import CROSSING_LINE_LENGTH
 
 
 class SessionViewer(QMainWindow):
@@ -64,6 +66,9 @@ class SessionViewer(QMainWindow):
         for i, lap in enumerate(self._session.laps):
             self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.3f}s)")
         top_row.addWidget(self._ref_combo)
+        self._btn_sector = QPushButton("+ Sector")
+        self._btn_sector.clicked.connect(self._add_sector_split)
+        top_row.addWidget(self._btn_sector)
         top_row.addStretch()
         left_layout.addLayout(top_row)
 
@@ -289,6 +294,38 @@ class SessionViewer(QMainWindow):
         session_time = self._session.laps[self._active_lap_idx].lap_start_time + mouse_point.x()
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
+
+    def _add_sector_split(self):
+        """Create a sector split line at the current cursor position."""
+        import math
+
+        session_time = self._current_session_time
+        sample_idx = self.get_sample_index_for_session_time(session_time)
+
+        # Get reference lap's lat/lon/heading at this spatial position
+        ref_lap = self._session.laps[self._session.reference_lap_index]
+        lat_ch = ref_lap.channels.get("GPS Lat")
+        lon_ch = ref_lap.channels.get("GPS Lon")
+        heading_ch = ref_lap.channels.get("GPS Heading")
+
+        if not (lat_ch and lon_ch and heading_ch):
+            QMessageBox.warning(self, "Error", "Can't split sector here - missing GPS channels")
+            return
+
+        lat = lat_ch.samples[sample_idx]
+        lon = lon_ch.samples[sample_idx]
+        heading = heading_ch.samples[sample_idx]
+
+        if lat is None or lon is None or heading is None:
+            QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
+            return
+        if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
+            QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
+            return
+
+        split_line = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
+        self._session.track.sector_split_lines.append(split_line)
+        print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
