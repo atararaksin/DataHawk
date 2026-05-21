@@ -27,24 +27,29 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
     if not (lat_ch and lon_ch and mc_ch):
         return []
 
-    # Use raw data for precise crossing detection
-    lats = lat_ch.raw_values
-    lons = lon_ch.raw_values
-    mc_raw_ts = mc_ch.raw_timestamps
-    mc_raw_vals = mc_ch.raw_values
+    # Use reindexed data (same sample count across channels)
+    lats = lat_ch.samples
+    lons = lon_ch.samples
+    mcs = mc_ch.samples
 
     crossing_times: list[float] = []
 
     for line in split_lines:
         best_time = None
         for i in range(len(lats) - 1):
+            if math.isnan(lats[i]) or math.isnan(lats[i + 1]):
+                continue
+            if math.isnan(lons[i]) or math.isnan(lons[i + 1]):
+                continue
             pt = intersection(line, lats[i], lons[i], lats[i + 1], lons[i + 1])
             if pt is not None:
+                if math.isnan(mcs[i]) or math.isnan(mcs[i + 1]):
+                    continue
                 # Interpolate Master Clk at crossing point
                 t = interpolate_by_gps(
                     pt.lat, pt.lon,
-                    lats[i], lons[i], mc_raw_vals[i],
-                    lats[i + 1], lons[i + 1], mc_raw_vals[i + 1],
+                    lats[i], lons[i], mcs[i],
+                    lats[i + 1], lons[i + 1], mcs[i + 1],
                 )
                 best_time = t
                 break  # Take first crossing per line
