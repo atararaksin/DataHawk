@@ -339,6 +339,7 @@ class SessionViewer(QMainWindow):
         self._session.track.sector_split_lines.append(split_line)
         populate_sectors(self._session)
         self._rebuild_lap_table()
+        self._update_plot()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _sync_cursor(self):
@@ -409,16 +410,22 @@ class SessionViewer(QMainWindow):
 
         # Sector split lines
         # S1 is always at lap start (x=0)
+        sector_labels: list[tuple[pg.TextItem, float]] = []
         s1_label = pg.TextItem("S1", color="w", anchor=(0, 1.0))
-        s1_label.setPos(0, 0)
         self._plot.addItem(s1_label)
+        sector_labels.append((s1_label, 0))
         for i, split_time in enumerate(lap.sector_split_times):
             if not math.isnan(split_time):
                 x = split_time - lap.lap_start_time
                 line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine))
                 self._plot.addItem(line)
                 label = pg.TextItem(f"S{i+2}", color="w", anchor=(0, 1.0))
-                label.setPos(x, 0)
                 self._plot.addItem(label)
+                sector_labels.append((label, x))
 
         self._plot.enableAutoRange()
+
+        # Position sector labels at top of Y range after autorange
+        y_top = self._plot.viewRange()[1][1]
+        for label, x in sector_labels:
+            label.setPos(x, y_top)
