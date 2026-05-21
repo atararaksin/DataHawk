@@ -317,6 +317,14 @@ class SessionViewer(QMainWindow):
         session_time = self._current_session_time
         sample_idx = self.get_sample_index_for_session_time(session_time)
 
+        # Check if within track limits using Master Clk continuity on current lap
+        current_lap = self._session.laps[self._active_lap_idx]
+        mc_ch = current_lap.channels.get("Master Clk")
+        if mc_ch and sample_idx + 1 < len(mc_ch.samples):
+            if math.isnan(mc_ch.samples[sample_idx]) or math.isnan(mc_ch.samples[sample_idx + 1]):
+                QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
+                return
+
         # Get reference lap's lat/lon/heading at this spatial position
         ref_lap = self._session.laps[self._session.reference_lap_index]
         lat_ch = ref_lap.channels.get("GPS Latitude")
