@@ -22,6 +22,7 @@ class Lap:
     lap_start_time: float
     channels: dict[str, Channel] = field(default_factory=dict)
     sector_times: list[float] = field(default_factory=list)  # duration of each sector (NaN if unknown)
+    sector_split_times: list[float] = field(default_factory=list)  # absolute times of sector splits (NaN if unknown)
 
 @dataclass
 class Track:

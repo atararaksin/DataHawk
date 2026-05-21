@@ -20,7 +20,7 @@ from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
-from datahawk.sector_detection import populate_sector_times
+from datahawk.sector_detection import populate_sectors
 
 
 class SessionViewer(QMainWindow):
@@ -28,7 +28,7 @@ class SessionViewer(QMainWindow):
         super().__init__(parent)
         parsed = parse_xrz(xrz_path)
         self._session: Session = process_session(parsed)
-        populate_sector_times(self._session)
+        populate_sectors(self._session)
         self._xrz_path = xrz_path
         self._video_offset: float = 0.0  # video_time = session_time + offset
 
@@ -337,7 +337,7 @@ class SessionViewer(QMainWindow):
 
         split_line = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
         self._session.track.sector_split_lines.append(split_line)
-        populate_sector_times(self._session)
+        populate_sectors(self._session)
         self._rebuild_lap_table()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
@@ -406,5 +406,19 @@ class SessionViewer(QMainWindow):
                             ref_samples.append(v)
                     if ref_times:
                         self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
+
+        # Sector split lines
+        # S1 is always at lap start (x=0)
+        s1_label = pg.TextItem("S1", color="w", anchor=(0, 1.0))
+        s1_label.setPos(0, 0)
+        self._plot.addItem(s1_label)
+        for i, split_time in enumerate(lap.sector_split_times):
+            if not math.isnan(split_time):
+                x = split_time - lap.lap_start_time
+                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine))
+                self._plot.addItem(line)
+                label = pg.TextItem(f"S{i+2}", color="w", anchor=(0, 1.0))
+                label.setPos(x, 0)
+                self._plot.addItem(label)
 
         self._plot.enableAutoRange()

@@ -56,25 +56,28 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
     return crossing_times
 
 
-def calculate_sector_times(session: Session, reference_lap_sector_split_times: list[float], lap: Lap) -> list[float]:
-    """Calculate sector durations for a lap based on reference lap sector split positions.
+def calculate_sector_split_times(session: Session, reference_lap_sector_split_times: list[float], lap: Lap) -> list[float]:
+    """Get absolute sector split times for a lap by looking up Master Clk at reference positions.
 
-    Returns list of sector durations. Always one more sector than split times.
-    NaN for sectors where split time couldn't be determined.
+    Returns list of split times (same length as reference_lap_sector_split_times). NaN if off-track.
     """
-    n_splits = len(reference_lap_sector_split_times)
-
-    # Get split times for this lap by looking up Master Clk at corresponding positions
     lap_split_times: list[float] = []
     for ref_time in reference_lap_sector_split_times:
         t = get_channel_value_in_another_lap_with_interpolation(
             session, ref_time, lap, "Master Clk"
         )
         lap_split_times.append(t)
+    return lap_split_times
 
-    # Build sector durations: n_splits + 1 sectors
+
+def calculate_sector_times(reference_lap_sector_split_times: list[float], lap: Lap) -> list[float]:
+    """Calculate sector durations for a lap from its sector_split_times.
+
+    Returns list of sector durations. Always one more sector than split times.
+    NaN for sectors where split time couldn't be determined.
+    """
     # Boundaries: [lap_start_time, split1, split2, ..., lap_start_time + lap_time]
-    boundaries = [lap.lap_start_time] + lap_split_times + [lap.lap_start_time + lap.lap_time]
+    boundaries = [lap.lap_start_time] + list(lap.sector_split_times) + [lap.lap_start_time + lap.lap_time]
 
     sector_times: list[float] = []
     for i in range(len(boundaries) - 1):
@@ -88,12 +91,14 @@ def calculate_sector_times(session: Session, reference_lap_sector_split_times: l
     return sector_times
 
 
-def populate_sector_times(session: Session):
-    """Populate sector_times for all laps in the session."""
+def populate_sectors(session: Session):
+    """Populate sector_split_times and sector_times for all laps in the session."""
     ref_split_times = detect_reference_lap_sector_split_times(session)
 
     for lap in session.laps:
         if not ref_split_times:
+            lap.sector_split_times = []
             lap.sector_times = [lap.lap_time]
         else:
-            lap.sector_times = calculate_sector_times(session, ref_split_times, lap)
+            lap.sector_split_times = calculate_sector_split_times(session, ref_split_times, lap)
+            lap.sector_times = calculate_sector_times(ref_split_times, lap)
