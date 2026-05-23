@@ -22,6 +22,7 @@ from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.sector_detection import populate_sectors
+from datahawk.storage import save_track
 
 
 class SessionViewer(QMainWindow):
@@ -415,6 +416,10 @@ class SessionViewer(QMainWindow):
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
 
+    def _save_track(self):
+        """Persist track SF line and sector splits to DB."""
+        save_track(self._session.track)
+
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
         session_time = self._current_session_time
@@ -451,6 +456,7 @@ class SessionViewer(QMainWindow):
         populate_sectors(self._session)
         self._rebuild_lap_table()
         self._update_plot()
+        self._save_track()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _remove_sector_split(self):
@@ -471,6 +477,7 @@ class SessionViewer(QMainWindow):
         populate_sectors(self._session)
         self._rebuild_lap_table()
         self._update_plot()
+        self._save_track()
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""

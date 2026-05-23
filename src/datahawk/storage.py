@@ -1,11 +1,14 @@
 """Persistent storage: SQLite metadata + session files."""
 
+import json
 import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from platformdirs import user_data_dir
+
+from datahawk.types import Track, Line, Point
 
 APP_NAME = "DataHawk"
 DATA_DIR = Path(user_data_dir(APP_NAME, appauthor=False))
@@ -25,6 +28,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     best_lap_time REAL,
     file_path TEXT NOT NULL,
     imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tracks (
+    name TEXT PRIMARY KEY,
+    sf_line TEXT NOT NULL,
+    sector_split_lines TEXT NOT NULL DEFAULT '[]'
 );
 """
 
@@ -103,3 +111,36 @@ def get_session_file_path(session_id: str) -> Path | None:
     if row:
         return SESSIONS_DIR / row["file_path"]
     return None
+
+
+def _line_to_json(line: Line) -> list:
+    return [line.a.lat, line.a.lon, line.b.lat, line.b.lon]
+
+
+def _line_from_json(arr: list) -> Line:
+    return Line(Point(arr[0], arr[1]), Point(arr[2], arr[3]))
+
+
+def save_track(track: Track):
+    """Save/update track SF line and sector split lines."""
+    db = _get_db()
+    sf = json.dumps(_line_to_json(track.sf_line))
+    splits = json.dumps([_line_to_json(l) for l in track.sector_split_lines])
+    db.execute(
+        "INSERT OR REPLACE INTO tracks (name, sf_line, sector_split_lines) VALUES (?, ?, ?)",
+        (track.name, sf, splits),
+    )
+    db.commit()
+    db.close()
+
+
+def load_track(name: str) -> Track | None:
+    """Load track from DB. Returns None if not found."""
+    db = _get_db()
+    row = db.execute("SELECT sf_line, sector_split_lines FROM tracks WHERE name = ?", (name,)).fetchone()
+    db.close()
+    if not row:
+        return None
+    sf = _line_from_json(json.loads(row["sf_line"]))
+    splits = [_line_from_json(arr) for arr in json.loads(row["sector_split_lines"])]
+    return Track(name=name, sf_line=sf, sector_split_lines=splits)
