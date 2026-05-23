@@ -157,7 +157,8 @@ class SessionViewer(QMainWindow):
         self._active_lap_idx = 0
         self._current_session_time = 0.0
         if self._session.laps:
-            self._table.selectRow(0)
+            self.jump_to_time(self._session.laps[0].lap_start_time)
+            self._update_plot()
 
 
     def _rebuild_lap_table(self):
