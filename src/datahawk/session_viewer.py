@@ -38,21 +38,55 @@ class SessionViewer(QMainWindow):
 
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
+        main_layout = QVBoxLayout(central)
 
-        # Left side: laps + plot
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
+        # === Top section (2/3 height): lap table + video side by side ===
+        top_splitter = QSplitter(Qt.Horizontal)
 
-        # Laps table
+        # Lap table (fixed width 300)
         self._table = QTableWidget()
         self._table.setSelectionBehavior(QTableWidget.SelectItems)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
-        self._table.setMaximumHeight(200)
+        self._table.setFixedWidth(300)
         self._table.setCursor(Qt.PointingHandCursor)
         self._rebuild_lap_table()
-        left_layout.addWidget(self._table)
+        top_splitter.addWidget(self._table)
+
+        # Video player
+        video_container = QWidget()
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._video_widget = QVideoWidget()
+        video_layout.addWidget(self._video_widget)
+
+        # Video controls
+        ctrl_row = QHBoxLayout()
+        self._btn_load = QPushButton("Load Video")
+        self._btn_play = QPushButton("▶")
+        self._btn_play.setFixedWidth(40)
+        self._btn_play.setEnabled(False)
+        self._video_slider = QSlider(Qt.Horizontal)
+        self._video_slider.setEnabled(False)
+        self._lbl_time = QLabel("--:-- / --:--")
+        ctrl_row.addWidget(self._btn_load)
+        ctrl_row.addWidget(self._btn_play)
+        ctrl_row.addWidget(self._video_slider)
+        ctrl_row.addWidget(self._lbl_time)
+        video_layout.addLayout(ctrl_row)
+
+        # Offset display
+        self._lbl_offset = QLabel("Sync: no video loaded")
+        video_layout.addWidget(self._lbl_offset)
+
+        top_splitter.addWidget(video_container)
+        top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
+        top_splitter.setStretchFactor(1, 1)  # video takes remaining space
+
+        # === Bottom section (1/3 height): channel selector + graph ===
+        bottom = QWidget()
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
 
         # Channel selector and reference lap
         top_row = QHBoxLayout()
@@ -73,55 +107,27 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
         top_row.addStretch()
-        left_layout.addLayout(top_row)
+        bottom_layout.addLayout(top_row)
 
         # Plot widget
         self._plot = pg.PlotWidget()
         self._plot.setLabel("bottom", "Time", units="s")
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.scene().sigMouseClicked.connect(self._on_plot_click)
-        left_layout.addWidget(self._plot)
+        bottom_layout.addWidget(self._plot)
 
         # Cursor line on plot
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
         self._cursor.setVisible(False)
         self._plot.addItem(self._cursor)
 
-        # Right side: video player
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._video_widget = QVideoWidget()
-        self._video_widget.setMinimumWidth(400)
-        right_layout.addWidget(self._video_widget)
-
-        # Video controls
-        ctrl_row = QHBoxLayout()
-        self._btn_load = QPushButton("Load Video")
-        self._btn_play = QPushButton("▶")
-        self._btn_play.setFixedWidth(40)
-        self._btn_play.setEnabled(False)
-        self._video_slider = QSlider(Qt.Horizontal)
-        self._video_slider.setEnabled(False)
-        self._lbl_time = QLabel("--:-- / --:--")
-        ctrl_row.addWidget(self._btn_load)
-        ctrl_row.addWidget(self._btn_play)
-        ctrl_row.addWidget(self._video_slider)
-        ctrl_row.addWidget(self._lbl_time)
-        right_layout.addLayout(ctrl_row)
-
-        # Offset display
-        self._lbl_offset = QLabel("Sync: no video loaded")
-        right_layout.addWidget(self._lbl_offset)
-
-        # Splitter
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(left)
-        splitter.addWidget(right)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        main_layout.addWidget(splitter)
+        # === Main vertical splitter: top (2/3) + bottom (1/3) ===
+        vsplitter = QSplitter(Qt.Vertical)
+        vsplitter.addWidget(top_splitter)
+        vsplitter.addWidget(bottom)
+        vsplitter.setStretchFactor(0, 2)
+        vsplitter.setStretchFactor(1, 1)
+        main_layout.addWidget(vsplitter)
 
         # Media player
         self._player = QMediaPlayer()
