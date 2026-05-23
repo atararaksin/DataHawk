@@ -61,17 +61,19 @@ class SessionViewer(QMainWindow):
         video_layout.setContentsMargins(0, 0, 0, 0)
 
         self._video_widget = QVideoWidget()
-        video_layout.addWidget(self._video_widget)
+        video_layout.addWidget(self._video_widget, 1)  # video takes all space
 
-        # Video controls (compact single row)
+        # Video controls (overlay at bottom, minimal height)
         ctrl_row = QHBoxLayout()
         ctrl_row.setContentsMargins(0, 0, 0, 0)
         self._btn_load = QPushButton("Load Video")
+        self._btn_load.setFixedHeight(24)
         self._btn_play = QPushButton("▶")
-        self._btn_play.setFixedWidth(40)
+        self._btn_play.setFixedSize(30, 24)
         self._btn_play.setEnabled(False)
         self._video_slider = QSlider(Qt.Horizontal)
         self._video_slider.setEnabled(False)
+        self._video_slider.setFixedHeight(20)
         self._lbl_time = QLabel("--:-- / --:--")
         ctrl_row.addWidget(self._btn_load)
         ctrl_row.addWidget(self._btn_play)
@@ -129,8 +131,7 @@ class SessionViewer(QMainWindow):
         vsplitter = QSplitter(Qt.Vertical)
         vsplitter.addWidget(top_splitter)
         vsplitter.addWidget(bottom)
-        vsplitter.setStretchFactor(0, 2)
-        vsplitter.setStretchFactor(1, 1)
+        vsplitter.setSizes([500, 250])
         main_layout.addWidget(vsplitter)
 
         # Media player
@@ -181,9 +182,9 @@ class SessionViewer(QMainWindow):
         self._table.setHorizontalHeaderLabels(headers)
         for i, lap in enumerate(self._session.laps):
             self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.2f}s"))
+            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.2f}"))
             for s, st in enumerate(lap.sector_times):
-                text = f"{st:.2f}s" if not math.isnan(st) else "—"
+                text = f"{st:.2f}" if not math.isnan(st) else "—"
                 self._table.setItem(i, 2 + s, QTableWidgetItem(text))
         self._table.resizeColumnsToContents()
         self._table.blockSignals(False)
