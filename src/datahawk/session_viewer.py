@@ -47,7 +47,7 @@ class SessionViewer(QMainWindow):
         self._table = QTableWidget()
         self._table.setSelectionBehavior(QTableWidget.SelectItems)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
-        self._table.setFixedWidth(350)
+        self._table.setFixedWidth(400)
         font = self._table.font()
         font.setPointSize(font.pointSize() - 1)
         self._table.setFont(font)
