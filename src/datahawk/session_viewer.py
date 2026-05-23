@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QSlider, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -187,12 +188,26 @@ class SessionViewer(QMainWindow):
         self._table.setColumnCount(len(headers))
         self._table.setRowCount(len(self._session.laps))
         self._table.setHorizontalHeaderLabels(headers)
+        purple = QBrush(QColor(128, 0, 128))
+        best_lap_idx = self._session.reference_lap_index
+        # Find fastest sector times
+        best_sectors = [float('inf')] * n_sectors
+        for lap in self._session.laps:
+            for s, st in enumerate(lap.sector_times):
+                if not math.isnan(st) and st < best_sectors[s]:
+                    best_sectors[s] = st
         for i, lap in enumerate(self._session.laps):
             self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.2f}"))
+            item = QTableWidgetItem(f"{lap.lap_time:.2f}")
+            if i == best_lap_idx:
+                item.setForeground(purple)
+            self._table.setItem(i, 1, item)
             for s, st in enumerate(lap.sector_times):
                 text = f"{st:.2f}" if not math.isnan(st) else "—"
-                self._table.setItem(i, 2 + s, QTableWidgetItem(text))
+                item = QTableWidgetItem(text)
+                if not math.isnan(st) and st == best_sectors[s]:
+                    item.setForeground(purple)
+                self._table.setItem(i, 2 + s, item)
         self._table.resizeColumnsToContents()
         self._table.blockSignals(False)
 
