@@ -31,7 +31,6 @@ class SessionViewer(QMainWindow):
         self._session: Session = process_session(parsed)
         populate_sectors(self._session)
         self._xrz_path = xrz_path
-        self._jumping = False  # guard against sync timer re-entry during programmatic jumps
         self._video_offset: float | None = None  # None = no sync
 
         meta_time = self._session.start_time
@@ -299,7 +298,6 @@ class SessionViewer(QMainWindow):
         if not self._session.laps:
             return
 
-        self._jumping = True
         self._current_session_time = session_time
 
         # Find active lap by comparing against lap start times
@@ -321,7 +319,6 @@ class SessionViewer(QMainWindow):
         self._cursor.setPos(cursor_x)
 
         self._select_active_table_cell()
-        self._jumping = False
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
@@ -396,7 +393,7 @@ class SessionViewer(QMainWindow):
                 return
         else:
             return
-        session_time += 0.001
+        session_time += 0.01
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
     def _on_table_cell_clicked(self, row: int, col: int):
@@ -477,7 +474,7 @@ class SessionViewer(QMainWindow):
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
-        if not self._session.laps or self._video_offset is None or self._jumping:
+        if not self._session.laps or self._video_offset is None:
             return
 
         video_ms = self._player.position()
