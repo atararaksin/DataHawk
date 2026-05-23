@@ -69,6 +69,9 @@ class SessionViewer(QMainWindow):
         self._btn_sector = QPushButton("+ Sector")
         self._btn_sector.clicked.connect(self._add_sector_split)
         top_row.addWidget(self._btn_sector)
+        self._btn_rm_sector = QPushButton("- Sector")
+        self._btn_rm_sector.clicked.connect(self._remove_sector_split)
+        top_row.addWidget(self._btn_rm_sector)
         top_row.addStretch()
         left_layout.addLayout(top_row)
 
@@ -392,6 +395,25 @@ class SessionViewer(QMainWindow):
         self._rebuild_lap_table()
         self._update_plot()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
+
+    def _remove_sector_split(self):
+        """Remove all sector splits within ±2s of current time."""
+        session_time = self._current_session_time
+        lap = self._session.laps[self._active_lap_idx]
+
+        to_remove = []
+        for i, split_time in enumerate(lap.sector_split_times):
+            if not math.isnan(split_time) and abs(split_time - session_time) < 2.0:
+                to_remove.append(i)
+
+        if not to_remove:
+            return
+
+        for i in reversed(to_remove):
+            del self._session.track.sector_split_lines[i]
+        populate_sectors(self._session)
+        self._rebuild_lap_table()
+        self._update_plot()
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""

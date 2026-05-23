@@ -13,6 +13,7 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
     """Detect times at which the reference lap crosses each sector split line.
 
     Returns crossing times ordered by time of crossing.
+    Also reorders session.track.sector_split_lines to match chronological order.
     If no split lines, returns empty list.
     """
     split_lines = session.track.sector_split_lines
@@ -32,7 +33,8 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
     lons = lon_ch.samples
     mcs = mc_ch.samples
 
-    crossing_times: list[float] = []
+    # Pair each line with its crossing time
+    line_time_pairs: list[tuple[Line, float]] = []
 
     for line in split_lines:
         best_time = None
@@ -54,11 +56,12 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
                 best_time = t
                 break  # Take first crossing per line
         if best_time is not None:
-            crossing_times.append(best_time)
+            line_time_pairs.append((line, best_time))
 
-    # Order by crossing time
-    crossing_times.sort()
-    return crossing_times
+    # Sort by crossing time and reorder track's split lines
+    line_time_pairs.sort(key=lambda x: x[1])
+    session.track.sector_split_lines = [pair[0] for pair in line_time_pairs]
+    return [pair[1] for pair in line_time_pairs]
 
 
 def calculate_sector_split_times(session: Session, reference_lap_sector_split_times: list[float], lap: Lap) -> list[float]:
