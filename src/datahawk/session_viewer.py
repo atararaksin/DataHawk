@@ -138,6 +138,7 @@ class SessionViewer(QMainWindow):
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
         self._table.selectionModel().selectionChanged.connect(self._on_lap_selected)
+        self._table.cellClicked.connect(self._on_table_cell_clicked)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
         self._player.durationChanged.connect(self._on_duration)
@@ -301,6 +302,28 @@ class SessionViewer(QMainWindow):
 
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
+
+    def jump_to_sector(self, lap_idx: int, sector_idx: int):
+        """Jump to the beginning of a sector in a given lap."""
+        if lap_idx < 0 or lap_idx >= len(self._session.laps):
+            return
+        lap = self._session.laps[lap_idx]
+        if sector_idx == 0:
+            session_time = lap.lap_start_time
+        elif sector_idx - 1 < len(lap.sector_split_times):
+            session_time = lap.sector_split_times[sector_idx - 1]
+            if math.isnan(session_time):
+                return
+        else:
+            return
+        self.jump_to_time(session_time)
+        self.jump_video_to_time(session_time)
+
+    def _on_table_cell_clicked(self, row: int, col: int):
+        """Handle click on a specific cell — jump to sector if sector column clicked."""
+        if col >= 2:  # Columns 0=Lap, 1=Time, 2+=sectors
+            sector_idx = col - 2
+            self.jump_to_sector(row, sector_idx)
 
     def _on_plot_click(self, event):
         """Handle click on the plot to seek to that time."""
