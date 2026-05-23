@@ -47,9 +47,10 @@ class SessionViewer(QMainWindow):
 
         # Laps table
         self._table = QTableWidget()
-        self._table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._table.setSelectionBehavior(QTableWidget.SelectItems)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
         self._table.setMaximumHeight(200)
+        self._table.setCursor(Qt.PointingHandCursor)
         self._rebuild_lap_table()
         left_layout.addWidget(self._table)
 
@@ -137,7 +138,6 @@ class SessionViewer(QMainWindow):
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
-        self._table.selectionModel().selectionChanged.connect(self._on_lap_selected)
         self._table.cellClicked.connect(self._on_table_cell_clicked)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
@@ -252,9 +252,6 @@ class SessionViewer(QMainWindow):
 
         # Select lap if changed
         if lap_idx != self._active_lap_idx:
-            self._table.selectionModel().blockSignals(True)
-            self._table.selectRow(lap_idx)
-            self._table.selectionModel().blockSignals(False)
             self._active_lap_idx = lap_idx
             self._update_plot()
 
@@ -262,6 +259,26 @@ class SessionViewer(QMainWindow):
         cursor_x = session_time - self._session.laps[lap_idx].lap_start_time
         self._cursor.setVisible(True)
         self._cursor.setPos(cursor_x)
+
+        self._select_active_table_cell()
+
+    def _select_active_table_cell(self):
+        """Highlight the current sector cell of the current lap in the table."""
+        lap = self._session.laps[self._active_lap_idx]
+        session_time = self._current_session_time
+
+        # Determine which sector we're in
+        sector_idx = 0
+        for i, split_time in enumerate(lap.sector_split_times):
+            if not math.isnan(split_time) and session_time >= split_time:
+                sector_idx = i + 1
+            else:
+                break
+
+        col = 2 + sector_idx  # columns: Lap, Time, S1, S2, ...
+        self._table.blockSignals(True)
+        self._table.setCurrentCell(self._active_lap_idx, col)
+        self._table.blockSignals(False)
 
     def get_sample_index_for_session_time(self, session_time: float) -> int:
         """Get the reindexed sample index for a given session time using the temporal index."""
@@ -320,8 +337,11 @@ class SessionViewer(QMainWindow):
         self.jump_video_to_time(session_time)
 
     def _on_table_cell_clicked(self, row: int, col: int):
-        """Handle click on a specific cell — jump to sector if sector column clicked."""
-        if col >= 2:  # Columns 0=Lap, 1=Time, 2+=sectors
+        """Handle click on a table cell — jump to lap or sector."""
+        if col < 2:  # Lap or Time column
+            if row != self._active_lap_idx:
+                self.jump_to_lap(row)
+        else:  # Sector columns
             sector_idx = col - 2
             self.jump_to_sector(row, sector_idx)
 
@@ -382,17 +402,6 @@ class SessionViewer(QMainWindow):
         video_s = video_ms / 1000.0
         session_time = video_s - self._video_offset
         self.jump_to_time(session_time)
-
-    def _on_lap_selected(self, *_args):
-        """Handle user clicking a lap in the table."""
-        rows = self._table.selectionModel().selectedRows()
-        if not rows:
-            return
-        lap_idx = rows[0].row()
-        if lap_idx != self._active_lap_idx:
-            self.jump_to_lap(lap_idx)
-        else:
-            self._update_plot()
 
     def closeEvent(self, event):
         self._sync_timer.stop()
