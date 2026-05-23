@@ -231,6 +231,7 @@ class SessionViewer(QMainWindow):
             self._lbl_offset.setText(label)
             self._btn_sync.setEnabled(True)
             self._btn_sync.setChecked(True)
+            self._btn_sync.setStyleSheet("background-color: green;")
             self._cursor.setVisible(True)
             self._sync_timer.start()
         except Exception as e:
@@ -257,10 +258,12 @@ class SessionViewer(QMainWindow):
             video_s = self._player.position() / 1000.0
             self._video_offset = video_s - self._current_session_time
             self._cursor.setVisible(True)
+            self._btn_sync.setStyleSheet("background-color: green;")
             if self._player.playbackState() == QMediaPlayer.PlayingState:
                 self._sync_timer.start()
         else:
             self._video_offset = None
+            self._btn_sync.setStyleSheet("")
             self._sync_timer.stop()
 
     def _on_duration(self, ms):
