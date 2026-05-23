@@ -86,8 +86,7 @@ def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
     sf_line = detect_start_finish_fine(parsed)
 
-    lap_times = detect_laps(parsed, sf_line)
-    crossings = lap_times  # detect_laps returns crossing timestamps directly
+    crossings = detect_laps(parsed, sf_line)
 
     lat_ch = parsed.channels.get(-1)
     lon_ch = parsed.channels.get(-2)
