@@ -22,7 +22,7 @@ from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.sector_detection import populate_sectors
-from datahawk.storage import save_track
+from datahawk.storage import save_track, delete_track
 
 
 class SessionViewer(QMainWindow):
@@ -121,6 +121,9 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
+        self._btn_clear_track = QPushButton("Clear track")
+        self._btn_clear_track.clicked.connect(self._clear_track)
+        top_row.addWidget(self._btn_clear_track)
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
@@ -419,6 +422,18 @@ class SessionViewer(QMainWindow):
     def _save_track(self):
         """Persist track SF line and sector splits to DB."""
         save_track(self._session.track)
+
+    def _clear_track(self):
+        """Evict track from DB and reload session with fresh SF detection."""
+        delete_track(self._session.track.name)
+        parsed = parse_xrz(self._xrz_path)
+        self._session = process_session(parsed)
+        populate_sectors(self._session)
+        self._active_lap_idx = 0
+        self._rebuild_lap_table()
+        if self._session.laps:
+            self.jump_to_time(self._session.laps[0].lap_start_time)
+        self._update_plot()
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""

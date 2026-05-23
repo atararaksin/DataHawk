@@ -144,3 +144,11 @@ def load_track(name: str) -> Track | None:
     sf = _line_from_json(json.loads(row["sf_line"]))
     splits = [_line_from_json(arr) for arr in json.loads(row["sector_split_lines"])]
     return Track(name=name, sf_line=sf, sector_split_lines=splits)
+
+
+def delete_track(name: str):
+    """Remove track from DB."""
+    db = _get_db()
+    db.execute("DELETE FROM tracks WHERE name = ?", (name,))
+    db.commit()
+    db.close()
