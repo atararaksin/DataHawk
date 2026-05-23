@@ -30,7 +30,7 @@ class SessionViewer(QMainWindow):
         self._session: Session = process_session(parsed)
         populate_sectors(self._session)
         self._xrz_path = xrz_path
-        self._video_offset: float = 0.0  # video_time = session_time + offset
+        self._video_offset: float | None = None  # None = no sync
 
         meta_time = self._session.start_time
         self.setWindowTitle(f"DataHawk — {self._session.track} {self._session.date} {meta_time}")
@@ -75,8 +75,15 @@ class SessionViewer(QMainWindow):
         self._video_slider.setEnabled(False)
         self._video_slider.setFixedHeight(20)
         self._lbl_time = QLabel("--:-- / --:--")
+        self._btn_sync = QPushButton("🔗")
+        self._btn_sync.setFixedSize(30, 24)
+        self._btn_sync.setCheckable(True)
+        self._btn_sync.setEnabled(False)
+        self._btn_sync.setToolTip("Sync video ↔ graph")
+        self._btn_sync.clicked.connect(self._toggle_sync)
         ctrl_row.addWidget(self._btn_load)
         ctrl_row.addWidget(self._btn_play)
+        ctrl_row.addWidget(self._btn_sync)
         ctrl_row.addWidget(self._video_slider)
         ctrl_row.addWidget(self._lbl_time)
         video_layout.addLayout(ctrl_row)
@@ -222,21 +229,39 @@ class SessionViewer(QMainWindow):
             else:
                 label += ")"
             self._lbl_offset.setText(label)
+            self._btn_sync.setEnabled(True)
+            self._btn_sync.setChecked(True)
             self._cursor.setVisible(True)
             self._sync_timer.start()
         except Exception as e:
             self._lbl_offset.setText(f"Sync failed: {e}")
-            self._video_offset = 0.0
+            self._video_offset = None
+            self._btn_sync.setEnabled(True)
+            self._btn_sync.setChecked(False)
 
     def _toggle_play(self):
         if self._player.playbackState() == QMediaPlayer.PlayingState:
             self._player.pause()
             self._btn_play.setText("▶")
-            self._sync_timer.stop()
+            if self._video_offset is not None:
+                self._sync_timer.stop()
         else:
             self._player.play()
             self._btn_play.setText("⏸")
-            self._sync_timer.start()
+            if self._video_offset is not None:
+                self._sync_timer.start()
+
+    def _toggle_sync(self):
+        """Toggle sync between video and graph. When enabling, set offset from current positions."""
+        if self._btn_sync.isChecked():
+            video_s = self._player.position() / 1000.0
+            self._video_offset = video_s - self._current_session_time
+            self._cursor.setVisible(True)
+            if self._player.playbackState() == QMediaPlayer.PlayingState:
+                self._sync_timer.start()
+        else:
+            self._video_offset = None
+            self._sync_timer.stop()
 
     def _on_duration(self, ms):
         self._video_slider.setRange(0, ms)
@@ -306,7 +331,9 @@ class SessionViewer(QMainWindow):
         return self._session.temporal_index[idx].sample_index
 
     def jump_video_to_time(self, session_time: float):
-        """Seek video to match a given session time."""
+        """Seek video to match a given session time (only if sync is on)."""
+        if self._video_offset is None:
+            return
         video_s = session_time + self._video_offset
         self._player.setPosition(int(video_s * 1000))
 
@@ -429,7 +456,7 @@ class SessionViewer(QMainWindow):
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
-        if not self._session.laps:
+        if not self._session.laps or self._video_offset is None:
             return
 
         video_ms = self._player.position()
@@ -480,16 +507,16 @@ class SessionViewer(QMainWindow):
                             ref_times.append(t - t0)
                             ref_samples.append(v)
                     if ref_times:
-                        self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("c", width=1, style=Qt.DashLine), name=f"Lap {ref_sel + 1}")
+                        self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_sel + 1}")
 
         # Sector split lines
-        s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine),
+        s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),
                                   label="S1", labelOpts={"position": 0.95, "color": "w"})
         self._plot.addItem(s1_line)
         for i, split_time in enumerate(lap.sector_split_times):
             if not math.isnan(split_time):
                 x = split_time - lap.lap_start_time
-                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1, style=Qt.DashLine),
+                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1),
                                        label=f"S{i+2}", labelOpts={"position": 0.95, "color": "w"})
                 self._plot.addItem(line)
 
