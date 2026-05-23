@@ -47,7 +47,10 @@ class SessionViewer(QMainWindow):
         self._table = QTableWidget()
         self._table.setSelectionBehavior(QTableWidget.SelectItems)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
-        self._table.setFixedWidth(300)
+        self._table.setFixedWidth(350)
+        font = self._table.font()
+        font.setPointSize(font.pointSize() - 1)
+        self._table.setFont(font)
         self._table.setCursor(Qt.PointingHandCursor)
         self._rebuild_lap_table()
         top_splitter.addWidget(self._table)
@@ -60,8 +63,9 @@ class SessionViewer(QMainWindow):
         self._video_widget = QVideoWidget()
         video_layout.addWidget(self._video_widget)
 
-        # Video controls
+        # Video controls (compact single row)
         ctrl_row = QHBoxLayout()
+        ctrl_row.setContentsMargins(0, 0, 0, 0)
         self._btn_load = QPushButton("Load Video")
         self._btn_play = QPushButton("▶")
         self._btn_play.setFixedWidth(40)
@@ -75,9 +79,9 @@ class SessionViewer(QMainWindow):
         ctrl_row.addWidget(self._lbl_time)
         video_layout.addLayout(ctrl_row)
 
-        # Offset display
-        self._lbl_offset = QLabel("Sync: no video loaded")
-        video_layout.addWidget(self._lbl_offset)
+        # Hidden sync label (still computed, just not shown)
+        self._lbl_offset = QLabel()
+        self._lbl_offset.setVisible(False)
 
         top_splitter.addWidget(video_container)
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
@@ -98,7 +102,7 @@ class SessionViewer(QMainWindow):
         self._ref_combo = QComboBox()
         self._ref_combo.addItem("None")
         for i, lap in enumerate(self._session.laps):
-            self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.3f}s)")
+            self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
         top_row.addWidget(self._ref_combo)
         self._btn_sector = QPushButton("+ Sector")
         self._btn_sector.clicked.connect(self._add_sector_split)
@@ -177,9 +181,9 @@ class SessionViewer(QMainWindow):
         self._table.setHorizontalHeaderLabels(headers)
         for i, lap in enumerate(self._session.laps):
             self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.3f}s"))
+            self._table.setItem(i, 1, QTableWidgetItem(f"{lap.lap_time:.2f}s"))
             for s, st in enumerate(lap.sector_times):
-                text = f"{st:.3f}s" if not math.isnan(st) else "—"
+                text = f"{st:.2f}s" if not math.isnan(st) else "—"
                 self._table.setItem(i, 2 + s, QTableWidgetItem(text))
         self._table.resizeColumnsToContents()
         self._table.blockSignals(False)
