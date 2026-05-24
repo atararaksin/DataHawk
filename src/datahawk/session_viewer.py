@@ -21,19 +21,20 @@ from datahawk.xrz_parser import parse_xrz
 from datahawk.session_processing import process_session, reindex_external_lap
 from datahawk.lap_detection import detect_laps
 from datahawk.types import Session, Lap, Point
-from datahawk.storage import list_saved_sessions, get_session_file_path
+from datahawk.storage import list_saved_sessions, get_session_file_path, get_video_path, set_video_path
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.sector_detection import populate_sectors
 
 
 class SessionViewer(QMainWindow):
-    def __init__(self, xrz_path: Path, parent=None):
+    def __init__(self, xrz_path: Path, session_id: str | None = None, parent=None):
         super().__init__(parent)
         parsed = parse_xrz(xrz_path)
         self._session: Session = process_session(parsed)
         populate_sectors(self._session)
         self._xrz_path = xrz_path
+        self._session_id = session_id
         self._video_offset: float | None = None  # None = no sync
 
         meta_time = self._session.start_time
@@ -184,6 +185,15 @@ class SessionViewer(QMainWindow):
             self.jump_to_time(self._session.laps[0].lap_start_time)
             self._update_plot()
 
+        # Auto-load saved video
+        if self._session_id:
+            saved_video = get_video_path(self._session_id)
+            if saved_video and Path(saved_video).exists():
+                self._player.setSource(QUrl.fromLocalFile(saved_video))
+                self._btn_play.setEnabled(True)
+                self._video_slider.setEnabled(True)
+                QTimer.singleShot(100, lambda: self._compute_sync(saved_video))
+
 
     def _rebuild_lap_table(self):
         """Rebuild the laps table with current sector columns."""
@@ -226,6 +236,10 @@ class SessionViewer(QMainWindow):
         self._btn_play.setEnabled(True)
         self._video_slider.setEnabled(True)
         self._lbl_offset.setText("Sync: computing...")
+
+        # Save video path to DB
+        if self._session_id:
+            set_video_path(self._session_id, path)
 
         # Run sync in background (takes ~0.4s)
         QTimer.singleShot(100, lambda: self._compute_sync(path))
@@ -526,7 +540,8 @@ class SessionViewer(QMainWindow):
         layout = QVBoxLayout(dlg)
         lst = QListWidget()
         for s in sessions:
-            lst.addItem(f"{s['date']} {s['time']} — {s['track']} ({s['original_filename']})")
+            best = f" — best {s['best_lap_time']:.2f}s" if s.get('best_lap_time') else ""
+            lst.addItem(f"{s['date']} {s['time']} — {s['track']}{best} ({s['original_filename']})")
         layout.addWidget(lst)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dlg.accept)
@@ -642,7 +657,7 @@ class SessionViewer(QMainWindow):
                         ref_samples.append(v)
                 if ref_times:
                     label = "External" if is_external else f"Lap {ref_sel + 1}"
-                    self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=label)
+                    self._plot.plot(ref_times, ref_samples, pen=pg.mkPen(QColor(255, 0, 0, 128), width=1), name=label)
 
         # Sector split lines
         s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),

@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         if not path or not path.exists():
             QMessageBox.warning(self, "Error", "Session file not found.")
             return
-        viewer = SessionViewer(path)
+        viewer = SessionViewer(path, session_id=session_id)
         viewer.show()
         self._viewers.append(viewer)
 

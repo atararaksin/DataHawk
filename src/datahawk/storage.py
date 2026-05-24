@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     size INTEGER,
     best_lap_time REAL,
     file_path TEXT NOT NULL,
-    imported_at TEXT NOT NULL
+    imported_at TEXT NOT NULL,
+    video_path TEXT
 );
 """
 
@@ -35,6 +36,11 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Add video_path column if missing (existing DBs)
+    try:
+        conn.execute("ALTER TABLE sessions ADD COLUMN video_path TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -102,4 +108,22 @@ def get_session_file_path(session_id: str) -> Path | None:
     db.close()
     if row:
         return SESSIONS_DIR / row["file_path"]
+    return None
+
+
+def set_video_path(session_id: str, video_path: str):
+    """Save the video file path for a session."""
+    db = _get_db()
+    db.execute("UPDATE sessions SET video_path = ? WHERE id = ?", (video_path, session_id))
+    db.commit()
+    db.close()
+
+
+def get_video_path(session_id: str) -> str | None:
+    """Get the saved video path for a session."""
+    db = _get_db()
+    row = db.execute("SELECT video_path FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+    if row:
+        return row["video_path"]
     return None
