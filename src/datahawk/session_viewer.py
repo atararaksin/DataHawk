@@ -127,6 +127,17 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
         top_row.addStretch()
+
+        # Live delta bar (iRacing-style)
+        self._delta_bar = QLabel("")
+        self._delta_bar.setFixedWidth(120)
+        self._delta_bar.setFixedHeight(24)
+        self._delta_bar.setAlignment(Qt.AlignCenter)
+        self._delta_bar.setStyleSheet(
+            "background: #222; color: #888; font-weight: bold; font-size: 14px; border-radius: 4px;"
+        )
+        top_row.addWidget(self._delta_bar)
+
         bottom_layout.addLayout(top_row)
 
         # Plot widget
@@ -340,6 +351,74 @@ class SessionViewer(QMainWindow):
         self._cursor.setPos(cursor_x)
 
         self._select_active_table_cell()
+        self._update_delta_bar()
+
+    def _update_delta_bar(self):
+        """Update the live delta bar comparing current lap vs reference lap elapsed time."""
+        # Determine reference lap
+        ref_sel = self._ref_combo.currentIndex() - 1
+        last_idx = self._ref_combo.count() - 1
+        is_external = (self._ref_combo.currentIndex() == last_idx and self._external_ref_lap is not None)
+
+        if is_external:
+            ref_lap = self._external_ref_lap
+        elif ref_sel >= 0 and ref_sel != self._active_lap_idx:
+            ref_lap = self._session.laps[ref_sel]
+        else:
+            self._delta_bar.setStyleSheet(
+                "background: #222; color: #888; font-weight: bold; font-size: 14px; border-radius: 4px;"
+            )
+            self._delta_bar.setText("")
+            return
+
+        lap = self._session.laps[self._active_lap_idx]
+        mc = lap.channels.get("Master Clk")
+        ref_mc = ref_lap.channels.get("Master Clk")
+        if not mc or not ref_mc:
+            return
+
+        # Find sample index for current position within this lap
+        elapsed = self._current_session_time - lap.lap_start_time
+        sample_idx = 0
+        for i, t in enumerate(mc.samples):
+            if not math.isnan(t) and (t - lap.lap_start_time) <= elapsed:
+                sample_idx = i
+            else:
+                break
+
+        # Get elapsed times at same spatial position
+        current_elapsed = elapsed
+        if sample_idx < len(ref_mc.samples):
+            ref_t = ref_mc.samples[sample_idx]
+            if not math.isnan(ref_t):
+                ref_elapsed = ref_t - ref_lap.lap_start_time
+            else:
+                return
+        else:
+            return
+
+        # Delta: positive = behind ref (slower), negative = ahead of ref (faster)
+        delta = current_elapsed - ref_elapsed
+        delta = max(-2.0, min(2.0, delta))
+
+        if delta > 0.001:
+            color = "#e74c3c"  # red - behind
+            text = f"+{delta:.3f}"
+        elif delta < -0.001:
+            color = "#2ecc40"  # green - ahead
+            text = f"{delta:.3f}"
+        else:
+            color = "#888"
+            text = "0.000"
+
+        # Background gradient proportional to delta magnitude
+        pct = abs(delta) / 2.0
+        bg_alpha = int(40 + pct * 80)
+        self._delta_bar.setStyleSheet(
+            f"background: rgba({','.join(str(int(c)) for c in (QColor(color).red(), QColor(color).green(), QColor(color).blue()))},{bg_alpha});"
+            f" color: {color}; font-weight: bold; font-size: 14px; border-radius: 4px;"
+        )
+        self._delta_bar.setText(text)
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
