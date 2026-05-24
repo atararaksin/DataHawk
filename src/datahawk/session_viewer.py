@@ -190,6 +190,7 @@ class SessionViewer(QMainWindow):
             saved_video = get_video_path(self._session_id)
             if saved_video and Path(saved_video).exists():
                 self._player.setSource(QUrl.fromLocalFile(saved_video))
+                self._player.setPosition(1)  # show first frame
                 self._btn_play.setEnabled(True)
                 self._video_slider.setEnabled(True)
                 QTimer.singleShot(100, lambda: self._compute_sync(saved_video))
@@ -233,6 +234,7 @@ class SessionViewer(QMainWindow):
             return
 
         self._player.setSource(QUrl.fromLocalFile(path))
+        self._player.setPosition(1)  # show first frame
         self._btn_play.setEnabled(True)
         self._video_slider.setEnabled(True)
         self._lbl_offset.setText("Sync: computing...")
@@ -631,7 +633,7 @@ class SessionViewer(QMainWindow):
         samples = ch.raw_values
 
         self._plot.setLabel("left", ch_name)
-        self._plot.plot(times, samples, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
+        self._plot.plot(times, samples, pen=pg.mkPen("y", width=2), name=f"Lap {lap_idx + 1}")
 
         # Reference lap overlay: use current lap's reindexed time axis + ref's reindexed values
         ref_sel = self._ref_combo.currentIndex() - 1
@@ -657,7 +659,7 @@ class SessionViewer(QMainWindow):
                         ref_samples.append(v)
                 if ref_times:
                     label = "External" if is_external else f"Lap {ref_sel + 1}"
-                    self._plot.plot(ref_times, ref_samples, pen=pg.mkPen(QColor(255, 0, 0, 128), width=1), name=label)
+                    self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("r", width=1), name=label)
 
         # Sector split lines
         s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),
