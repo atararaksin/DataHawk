@@ -10,7 +10,6 @@ from typing import Optional
 from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
 from datahawk.lap_detection import detect_start_finish_fine, detect_laps
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
-from datahawk.storage import load_track, save_track
 
 
 
@@ -85,12 +84,7 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
 
 def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
-    # Try loading track from DB first
-    saved_track = load_track(parsed.metadata.track)
-    if saved_track:
-        sf_line = saved_track.sf_line
-    else:
-        sf_line = detect_start_finish_fine(parsed)
+    sf_line = detect_start_finish_fine(parsed)
 
     crossings = detect_laps(parsed, sf_line)
 
@@ -99,11 +93,10 @@ def process_session(parsed: XrzSession) -> Session:
     speed_ch = parsed.channels.get(-3)
 
     if len(crossings) < 2 or not lat_ch or not lon_ch:
-        track = saved_track or Track(name=parsed.metadata.track, sf_line=sf_line)
         return Session(
             start_time=parsed.metadata.time,
             date=parsed.metadata.date,
-            track=track,
+            track=Track(name=parsed.metadata.track, sf_line=sf_line),
             samples_per_lap=0,
             reference_lap_index=0,
             best_lap_index=0,
@@ -138,10 +131,9 @@ def process_session(parsed: XrzSession) -> Session:
     samples_per_lap = len(ref_indices)
 
     if samples_per_lap < 10:
-        track = saved_track or Track(name=parsed.metadata.track, sf_line=sf_line)
         return Session(
             start_time=parsed.metadata.time, date=parsed.metadata.date,
-            track=track, samples_per_lap=0, reference_lap_index=0,
+            track=Track(name=parsed.metadata.track, sf_line=sf_line), samples_per_lap=0, reference_lap_index=0,
             best_lap_index=0, best_lap_time=0.0,
         )
 
@@ -157,12 +149,10 @@ def process_session(parsed: XrzSession) -> Session:
             channel_names[ch_id] = ch.name
 
     # Process each lap
-    track = saved_track or Track(name=parsed.metadata.track, sf_line=sf_line)
-
     session = Session(
         start_time=parsed.metadata.time,
         date=parsed.metadata.date,
-        track=track,
+        track=Track(name=parsed.metadata.track, sf_line=sf_line),
         samples_per_lap=samples_per_lap,
         reference_lap_index=fastest_idx,
         best_lap_index=fastest_idx,
@@ -253,10 +243,6 @@ def process_session(parsed: XrzSession) -> Session:
 
     # Build temporal index
     session.temporal_index = _build_temporal_index(session)
-
-    # Save track to DB if newly detected
-    if not saved_track:
-        save_track(session.track)
 
     return session
 
