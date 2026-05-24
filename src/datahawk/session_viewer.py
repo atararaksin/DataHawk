@@ -126,22 +126,19 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
-        top_row.addStretch()
 
         # Live delta bar (iRacing-style): dark bg, colored fill from center, white text
         from PySide6.QtWidgets import QFrame
         self._delta_container = QFrame()
-        self._delta_container.setFixedWidth(140)
         self._delta_container.setFixedHeight(22)
         self._delta_container.setStyleSheet("background: #1a1a1a; border: 1px solid #555; border-radius: 2px;")
         self._delta_fill = QFrame(self._delta_container)
-        self._delta_fill.setGeometry(70, 1, 0, 20)  # starts at center, zero width
+        self._delta_fill.setGeometry(0, 1, 0, 20)
         self._delta_fill.setStyleSheet("background: #555; border: none;")
         self._delta_label = QLabel("", self._delta_container)
-        self._delta_label.setGeometry(0, 0, 140, 22)
         self._delta_label.setAlignment(Qt.AlignCenter)
         self._delta_label.setStyleSheet("color: white; font-weight: bold; font-size: 13px; background: transparent; border: none;")
-        top_row.addWidget(self._delta_container)
+        top_row.addWidget(self._delta_container, 1)  # stretch factor 1 = fill remaining space
 
         bottom_layout.addLayout(top_row)
 
@@ -370,7 +367,7 @@ class SessionViewer(QMainWindow):
         elif ref_sel >= 0 and ref_sel != self._active_lap_idx:
             ref_lap = self._session.laps[ref_sel]
         else:
-            self._delta_fill.setGeometry(70, 1, 0, 20)
+            self._delta_fill.setGeometry(self._delta_container.width() // 2, 1, 0, 20)
             self._delta_label.setText("")
             return
 
@@ -414,16 +411,18 @@ class SessionViewer(QMainWindow):
             color = "#888"
             text = "0.00"
 
-        # Fill bar from center: right for positive (red), left for negative (green)
-        center = 69  # pixel center of 140px container (accounting for border)
-        max_half = 68  # max fill pixels per side
+        # Fill bar from center: left for positive (red/behind), right for negative (green/ahead)
+        w = self._delta_container.width() - 2  # account for border
+        center = w // 2
+        max_half = center
         pct = abs(delta) / 2.0
         fill_w = int(pct * max_half)
         if delta > 0:
-            self._delta_fill.setGeometry(center, 1, fill_w, 20)
+            self._delta_fill.setGeometry(center + 1 - fill_w, 1, fill_w, 20)
         else:
-            self._delta_fill.setGeometry(center - fill_w, 1, fill_w, 20)
+            self._delta_fill.setGeometry(center + 1, 1, fill_w, 20)
         self._delta_fill.setStyleSheet(f"background: {color}; border: none;")
+        self._delta_label.setGeometry(0, 0, self._delta_container.width(), 22)
         self._delta_label.setText(text)
 
     def _select_active_table_cell(self):
