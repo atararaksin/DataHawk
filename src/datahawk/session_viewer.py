@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
     QPushButton, QFileDialog, QSlider, QMessageBox,
+    QDialog, QListWidget, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QBrush, QColor
@@ -17,8 +18,10 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.xrz_parser import parse_xrz
-from datahawk.session_processing import process_session
-from datahawk.types import Session, Point
+from datahawk.session_processing import process_session, reindex_external_lap
+from datahawk.lap_detection import detect_laps
+from datahawk.types import Session, Lap, Point
+from datahawk.storage import list_saved_sessions, get_session_file_path
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.sector_detection import populate_sectors
@@ -113,6 +116,8 @@ class SessionViewer(QMainWindow):
         self._ref_combo.addItem("None")
         for i, lap in enumerate(self._session.laps):
             self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
+        self._ref_combo.addItem("Another session...")
+        self._external_ref_lap: Lap | None = None  # reindexed external lap
         top_row.addWidget(self._ref_combo)
         self._btn_sector = QPushButton("+ Sector")
         self._btn_sector.clicked.connect(self._add_sector_split)
@@ -159,7 +164,7 @@ class SessionViewer(QMainWindow):
 
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
-        self._ref_combo.currentIndexChanged.connect(self._update_plot)
+        self._ref_combo.currentIndexChanged.connect(self._on_ref_changed)
         self._table.cellClicked.connect(self._on_table_cell_clicked)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
@@ -487,6 +492,109 @@ class SessionViewer(QMainWindow):
         self._player.stop()
         super().closeEvent(event)
 
+    def _on_ref_changed(self, index: int):
+        """Handle reference dropdown change. Last item triggers external session picker."""
+        last_idx = self._ref_combo.count() - 1
+        if index == last_idx:
+            # "Another session..." selected
+            if not self._pick_external_ref_lap():
+                # User cancelled — revert to None
+                self._ref_combo.blockSignals(True)
+                self._ref_combo.setCurrentIndex(0)
+                self._ref_combo.blockSignals(False)
+                return
+        else:
+            # Switching away from external — reset the last item text
+            if self._external_ref_lap is not None:
+                self._ref_combo.blockSignals(True)
+                self._ref_combo.setItemText(last_idx, "Another session...")
+                self._ref_combo.blockSignals(False)
+            self._external_ref_lap = None
+        self._update_plot()
+
+    def _pick_external_ref_lap(self) -> bool:
+        """Show dialogs to pick a session then a lap. Returns True if successful."""
+        sessions = list_saved_sessions()
+        if not sessions:
+            QMessageBox.warning(self, "No sessions", "No other sessions found in database.")
+            return False
+
+        # --- Session picker dialog ---
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select Session")
+        dlg.setMinimumSize(400, 300)
+        layout = QVBoxLayout(dlg)
+        lst = QListWidget()
+        for s in sessions:
+            lst.addItem(f"{s['date']} {s['time']} — {s['track']} ({s['original_filename']})")
+        layout.addWidget(lst)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        lst.setCurrentRow(0)
+
+        if dlg.exec() != QDialog.Accepted or lst.currentRow() < 0:
+            return False
+
+        chosen_session = sessions[lst.currentRow()]
+        xrz_path = get_session_file_path(chosen_session["id"])
+        if not xrz_path or not xrz_path.exists():
+            QMessageBox.warning(self, "Error", "Session file not found.")
+            return False
+
+        # Parse external session and detect laps using master's S/F line
+        ext_parsed = parse_xrz(xrz_path)
+        sf_line = self._session.track.sf_line
+        crossings = detect_laps(ext_parsed, sf_line)
+
+        mclk_ch = ext_parsed.channels.get(0)
+        if not mclk_ch or len(crossings) < 2:
+            QMessageBox.warning(self, "Error", "Could not detect laps in external session.")
+            return False
+
+        ext_start = mclk_ch.timestamps[0]
+        ext_end = mclk_ch.timestamps[-1]
+        boundaries = [ext_start] + list(crossings) + [ext_end]
+        ext_lap_times = [boundaries[i+1] - boundaries[i] for i in range(len(boundaries)-1)]
+
+        # --- Lap picker dialog ---
+        dlg2 = QDialog(self)
+        dlg2.setWindowTitle("Select Lap")
+        dlg2.setMinimumSize(300, 250)
+        layout2 = QVBoxLayout(dlg2)
+        lst2 = QListWidget()
+        for i, lt in enumerate(ext_lap_times):
+            lst2.addItem(f"Lap {i + 1} ({lt:.2f}s)")
+        layout2.addWidget(lst2)
+        buttons2 = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons2.accepted.connect(dlg2.accept)
+        buttons2.rejected.connect(dlg2.reject)
+        layout2.addWidget(buttons2)
+        lst2.setCurrentRow(0)
+
+        if dlg2.exec() != QDialog.Accepted or lst2.currentRow() < 0:
+            return False
+
+        lap_idx = lst2.currentRow()
+        lap_start = boundaries[lap_idx]
+        lap_end = boundaries[lap_idx + 1]
+
+        try:
+            self._external_ref_lap = reindex_external_lap(
+                ext_parsed, lap_start, lap_end, self._session
+            )
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to reindex external lap: {e}")
+            return False
+
+        # Update dropdown text to show what was selected
+        self._ref_combo.blockSignals(True)
+        last_idx = self._ref_combo.count() - 1
+        self._ref_combo.setItemText(last_idx, f"Ext: {chosen_session['date']} L{lap_idx+1} ({ext_lap_times[lap_idx]:.2f}s)")
+        self._ref_combo.blockSignals(False)
+        return True
+
     def _update_plot(self, *_args):
         self._plot.clear()
         self._plot.addItem(self._cursor)
@@ -512,20 +620,29 @@ class SessionViewer(QMainWindow):
 
         # Reference lap overlay: use current lap's reindexed time axis + ref's reindexed values
         ref_sel = self._ref_combo.currentIndex() - 1
-        if ref_sel >= 0 and ref_sel != lap_idx:
+        last_idx = self._ref_combo.count() - 1
+        is_external = (self._ref_combo.currentIndex() == last_idx and self._external_ref_lap is not None)
+
+        if is_external:
+            ref_lap = self._external_ref_lap
+        elif ref_sel >= 0 and ref_sel != lap_idx:
             ref_lap = self._session.laps[ref_sel]
-            if ch_name in ref_lap.channels:
-                mc = lap.channels.get("Master Clk")
-                if mc:
-                    t0 = lap.lap_start_time
-                    ref_times = []
-                    ref_samples = []
-                    for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
-                        if t == t and v == v:  # skip NaN
-                            ref_times.append(t - t0)
-                            ref_samples.append(v)
-                    if ref_times:
-                        self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_sel + 1}")
+        else:
+            ref_lap = None
+
+        if ref_lap and ch_name in ref_lap.channels:
+            mc = lap.channels.get("Master Clk")
+            if mc:
+                t0 = lap.lap_start_time
+                ref_times = []
+                ref_samples = []
+                for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
+                    if t == t and v == v:  # skip NaN
+                        ref_times.append(t - t0)
+                        ref_samples.append(v)
+                if ref_times:
+                    label = "External" if is_external else f"Lap {ref_sel + 1}"
+                    self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=label)
 
         # Sector split lines
         s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),

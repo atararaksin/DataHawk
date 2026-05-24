@@ -82,6 +82,83 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
     return values[lo] + frac * (values[hi] - values[lo])
 
 
+def reindex_external_lap(
+    external_xrz: XrzSession,
+    lap_start: float,
+    lap_end: float,
+    ref_session: Session,
+) -> Lap:
+    """Reindex a lap from an external session against the master session's reference trajectory.
+
+    Uses the master session's fastest lap GPS trajectory as the spatial reference,
+    same as process_session does for its own laps.
+    """
+    ref_lap = ref_session.laps[ref_session.reference_lap_index]
+    samples_per_lap = ref_session.samples_per_lap
+
+    # Get reference trajectory in local meters
+    lat_ch_ref = ref_lap.channels.get("GPS Latitude")
+    lon_ch_ref = ref_lap.channels.get("GPS Longitude")
+    if not lat_ch_ref or not lon_ch_ref:
+        raise ValueError("Reference lap missing GPS channels")
+
+    cos_lat = math.cos(math.radians(lat_ch_ref.samples[0]))
+    ref_x = [(lon - lon_ch_ref.samples[0]) * 111000 * cos_lat for lon in lon_ch_ref.samples]
+    ref_y = [(lat - lat_ch_ref.samples[0]) * 111000 for lat in lat_ch_ref.samples]
+
+    # Get external lap GPS data
+    ext_lat = external_xrz.channels.get(-1)
+    ext_lon = external_xrz.channels.get(-2)
+    if not ext_lat or not ext_lon:
+        raise ValueError("External session missing GPS channels")
+
+    gps_times = ext_lat.timestamps
+    lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start <= t < lap_end]
+    if len(lap_gps_idx) < 10:
+        raise ValueError("External lap has insufficient GPS data")
+
+    lap_lats = [ext_lat.values[i] for i in lap_gps_idx]
+    lap_lons = [ext_lon.values[i] for i in lap_gps_idx]
+    lap_times_arr = [gps_times[i] for i in lap_gps_idx]
+
+    # Convert to same local meter frame as reference
+    lap_x = [(lon - lon_ch_ref.samples[0]) * 111000 * cos_lat for lon in lap_lons]
+    lap_y = [(lat - lat_ch_ref.samples[0]) * 111000 for lat in lap_lats]
+
+    # Spatial matching
+    fracs = _find_nearest_points(ref_x, ref_y, lap_x, lap_y, 8.0)
+
+    # Collect channel names
+    channel_names = {ch_id: ch.name for ch_id, ch in external_xrz.channels.items() if ch.timestamps}
+
+    lap = Lap(lap_index=0, lap_time=lap_end - lap_start, lap_start_time=lap_start)
+
+    for ch_id, ch_name in channel_names.items():
+        ch = external_xrz.channels[ch_id]
+        lo_i = max(0, bisect_left(ch.timestamps, lap_start) - 1)
+        hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
+        ch_times = ch.timestamps[lo_i:hi_i]
+        ch_vals = ch.values[lo_i:hi_i]
+        resampled = []
+        for s_idx in range(samples_per_lap):
+            seg_idx, frac = fracs[s_idx]
+            if seg_idx < 0:
+                resampled.append(float('nan'))
+            else:
+                t_interp = lap_times_arr[seg_idx] + frac * (
+                    lap_times_arr[seg_idx + 1] - lap_times_arr[seg_idx]
+                )
+                val = _interpolate_at(t_interp, ch_times, ch_vals)
+                resampled.append(val if val is not None else float('nan'))
+        raw_ts = [t - lap_start for t in ch_times]
+        lap.channels[ch_name] = Channel(
+            name=ch_name, samples=resampled,
+            raw_timestamps=raw_ts, raw_values=list(ch_vals),
+        )
+
+    return lap
+
+
 def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
     sf_line = detect_start_finish_fine(parsed)
