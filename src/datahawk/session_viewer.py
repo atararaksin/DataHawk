@@ -372,30 +372,16 @@ class SessionViewer(QMainWindow):
             return
 
         lap = self._session.laps[self._active_lap_idx]
-        mc = lap.channels.get("Master Clk")
-        ref_mc = ref_lap.channels.get("Master Clk")
-        if not mc or not ref_mc:
-            return
-
-        # Find sample index for current position within this lap
         elapsed = self._current_session_time - lap.lap_start_time
-        sample_idx = 0
-        for i, t in enumerate(mc.samples):
-            if not math.isnan(t) and (t - lap.lap_start_time) <= elapsed:
-                sample_idx = i
-            else:
-                break
 
-        # Get elapsed times at same spatial position
-        current_elapsed = elapsed
-        if sample_idx < len(ref_mc.samples):
-            ref_t = ref_mc.samples[sample_idx]
-            if not math.isnan(ref_t):
-                ref_elapsed = ref_t - ref_lap.lap_start_time
-            else:
-                return
-        else:
+        # Get ref lap's Master Clk at same spatial position (with interpolation)
+        from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
+        ref_t = get_channel_value_in_another_lap_with_interpolation(
+            self._session, self._current_session_time, ref_lap, "Master Clk"
+        )
+        if math.isnan(ref_t):
             return
+        ref_elapsed = ref_t - ref_lap.lap_start_time
 
         # Delta: positive = behind ref (slower), negative = ahead of ref (faster)
         delta = current_elapsed - ref_elapsed
