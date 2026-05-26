@@ -25,13 +25,17 @@ from datahawk.sector_detection import populate_sectors
 
 
 class SessionViewer(QMainWindow):
-    def __init__(self, xrz_path: Path, parent=None):
+    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, video_path: Path | None = None):
         super().__init__(parent)
-        parsed = parse_xrz(xrz_path)
-        self._session: Session = process_session(parsed)
+        if parsed_session is not None:
+            self._session = parsed_session
+        else:
+            parsed = parse_xrz(xrz_path)
+            self._session = process_session(parsed)
         populate_sectors(self._session)
         self._xrz_path = xrz_path
         self._video_offset: float | None = None  # None = no sync
+        self._initial_video_path = video_path  # for GoPro sessions
 
         meta_time = self._session.start_time
         self.setWindowTitle(f"DataHawk — {self._session.track} {self._session.date} {meta_time}")
@@ -179,6 +183,20 @@ class SessionViewer(QMainWindow):
             self.jump_to_time(self._session.laps[0].lap_start_time)
             self._update_plot()
 
+        # Auto-load video if provided (GoPro sessions)
+        if self._initial_video_path and self._initial_video_path.exists():
+            self._player.setSource(QUrl.fromLocalFile(str(self._initial_video_path)))
+            self._btn_play.setEnabled(True)
+            self._video_slider.setEnabled(True)
+            self._player.setPosition(1)
+            # For GoPro sessions, video IS the telemetry source, so offset = 0
+            self._video_offset = 0.0
+            self._btn_sync.setEnabled(True)
+            self._btn_sync.setChecked(True)
+            self._btn_sync.setStyleSheet("background-color: green;")
+            self._cursor.setVisible(True)
+            self._sync_timer.start()
+
 
     def _rebuild_lap_table(self):
         """Rebuild the laps table with current sector columns."""
@@ -229,6 +247,18 @@ class SessionViewer(QMainWindow):
         try:
             from datahawk.video_sync import sync_by_acceleration, sync_by_timestamp
             from datahawk.xrz_parser import parse_xrz as _parse
+
+            # Skip sync computation for GoPro sessions (video IS the telemetry source)
+            if self._initial_video_path:
+                self._video_offset = 0.0
+                self._lbl_offset.setText("Sync: 0.00s (GoPro)")
+                self._btn_sync.setEnabled(True)
+                self._btn_sync.setChecked(True)
+                self._btn_sync.setStyleSheet("background-color: green;")
+                self._cursor.setVisible(True)
+                self._sync_timer.start()
+                return
+
             parsed = _parse(self._xrz_path)
 
             result = sync_by_acceleration(video_path, parsed)

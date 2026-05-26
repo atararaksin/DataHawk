@@ -9,6 +9,7 @@ from typing import Optional
 
 from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
 from datahawk.lap_detection import detect_start_finish_fine, detect_laps
+from datahawk.gopro_sf_detection import detect_sf_from_max_speed
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
 
 
@@ -84,7 +85,12 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
 
 def process_session(parsed: XrzSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
-    sf_line = detect_start_finish_fine(parsed)
+    # Use ch4-based S/F detection if available, otherwise GoPro max-speed method
+    ch4 = parsed.channels.get(4)
+    if ch4 and ch4.timestamps:
+        sf_line = detect_start_finish_fine(parsed)
+    else:
+        sf_line = detect_sf_from_max_speed(parsed)
 
     crossings = detect_laps(parsed, sf_line)
 
