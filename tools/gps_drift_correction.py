@@ -176,22 +176,21 @@ class GpsDriftTool(QMainWindow):
         lat0_rad = math.radians(lat_ch.values[0])
         lon0_rad = math.radians(lon_ch.values[0])
 
-        # Split GPS into laps
+        # Split GPS into laps using GPS channel timestamps
         lats = np.array(lat_ch.values)
         lons = np.array(lon_ch.values)
-        times = np.array(lat_ch.timestamps)
+        gps_times = np.array(lat_ch.timestamps)
 
-        # Use Master Clk for time reference
+        # Boundaries in Master Clk time — use GPS timestamps for masking
         mclk_ch = session.channels.get(0)
-        mclk = np.array(mclk_ch.values) if mclk_ch else times
+        mclk_vals = np.array(mclk_ch.values) if mclk_ch else gps_times
 
-        # Build boundaries: [session_start] + crossings + [session_end]
-        boundaries = [mclk[0]] + crossings + [mclk[-1]]
+        boundaries = [gps_times[0]] + crossings + [gps_times[-1]]
 
         self._laps_xy = []
         lap_times = []
         for i in range(len(boundaries) - 1):
-            mask = (mclk >= boundaries[i]) & (mclk < boundaries[i + 1])
+            mask = (gps_times >= boundaries[i]) & (gps_times < boundaries[i + 1])
             if mask.sum() < 10:
                 continue
             lap_lats = lats[mask]
