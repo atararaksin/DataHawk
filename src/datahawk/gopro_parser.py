@@ -79,6 +79,7 @@ def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
     """Extract GPS5 data from GPMF track.
 
     Returns list of (time_seconds, lat_degrees, lon_degrees, speed_km_h).
+    Timestamps use actual sample duration from MP4 stts table.
     """
     from datahawk.video_sync import _find_top_level_box
 
@@ -95,8 +96,8 @@ def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
         f.read(4)  # skip 'moov'
         moov_data = f.read(moov_size - 8)
 
-        # Find GPMF track
-        stco_data, stsz_data, sample_count = _find_gpmf_track_from_moov(moov_data)
+        # Find GPMF track (includes sample_duration from stts)
+        stco_data, stsz_data, sample_count, sample_duration = _find_gpmf_track_from_moov(moov_data)
         if sample_count == 0:
             return []
 
@@ -106,13 +107,16 @@ def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
             sz = struct.unpack(">I", stsz_data[i * 4:i * 4 + 4])[0]
             f.seek(off)
             sample = f.read(sz)
-            _parse_gps5_from_sample(sample, i, results)
+            _parse_gps5_from_sample(sample, i, sample_duration, results)
 
     return results
 
 
-def _find_gpmf_track_from_moov(moov_data: bytes) -> tuple[bytes, bytes, int]:
-    """Find GPMF track's stco and stsz offsets from moov data."""
+def _find_gpmf_track_from_moov(moov_data: bytes) -> tuple[bytes, bytes, int, float]:
+    """Find GPMF track's stco and stsz offsets from moov data.
+
+    Returns (stco_offsets, stsz_sizes, sample_count, sample_duration_seconds).
+    """
     pos = 0
     while pos + 8 <= len(moov_data):
         size = struct.unpack(">I", moov_data[pos:pos + 4])[0]
@@ -124,6 +128,23 @@ def _find_gpmf_track_from_moov(moov_data: bytes) -> tuple[bytes, bytes, int]:
             # Check for meta handler (GPMF track)
             hdlr_idx = trak.find(b"hdlr")
             if hdlr_idx >= 0 and trak[hdlr_idx + 12:hdlr_idx + 16] == b"meta":
+                # Get timescale from mdhd
+                timescale = 1000
+                mdhd_idx = trak.find(b"mdhd")
+                if mdhd_idx >= 0:
+                    version = trak[mdhd_idx + 4]
+                    if version == 0:
+                        timescale = struct.unpack(">I", trak[mdhd_idx + 16:mdhd_idx + 20])[0]
+                    else:
+                        timescale = struct.unpack(">I", trak[mdhd_idx + 24:mdhd_idx + 28])[0]
+
+                # Get sample duration from stts
+                sample_duration = 1.001  # default fallback
+                stts_idx = trak.find(b"stts")
+                if stts_idx >= 0:
+                    stts_dur = struct.unpack(">I", trak[stts_idx + 16:stts_idx + 20])[0]
+                    sample_duration = stts_dur / timescale
+
                 stco_idx = trak.find(b"stco")
                 stsz_idx = trak.find(b"stsz")
                 if stco_idx >= 0 and stsz_idx >= 0:
@@ -133,12 +154,12 @@ def _find_gpmf_track_from_moov(moov_data: bytes) -> tuple[bytes, bytes, int]:
                     # stsz: version(4) + sample_size(4) + count(4) + sizes...
                     stsz_data = trak[stsz_idx + 16:stsz_idx + 16 + count * 4]
                     if count > 10:
-                        return stco_data, stsz_data, count
+                        return stco_data, stsz_data, count, sample_duration
         pos += size
-    return b"", b"", 0
+    return b"", b"", 0, 1.0
 
 
-def _parse_gps5_from_sample(sample: bytes, sample_idx: int,
+def _parse_gps5_from_sample(sample: bytes, sample_idx: int, sample_duration: float,
                             out: list[tuple[float, float, float, float]]) -> None:
     """Parse GPS5 data from a GPMF sample.
 
@@ -181,6 +202,7 @@ def _parse_gps5_from_sample(sample: bytes, sample_idx: int,
         speed_ms = speed2d_raw / scales[3]  # m/s
         speed_kmh = speed_ms * 3.6
 
-        # Time: sample_idx seconds + fractional within sample
-        t = sample_idx + j / repeat
+        # Correct timing: sample starts at sample_idx * sample_duration,
+        # fixes evenly spaced within the sample_duration window
+        t = sample_idx * sample_duration + j / repeat * sample_duration
         out.append((t, lat, lon, speed_kmh))
