@@ -126,8 +126,8 @@ class GoProGpsInspector(QMainWindow):
         left_layout.addLayout(lap_bar)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(5)
-        self._table.setHorizontalHeaderLabels(["Time (s)", "Latitude", "Longitude", "Alt (m)", "Speed (km/h)"])
+        self._table.setColumnCount(6)
+        self._table.setHorizontalHeaderLabels(["Time (s)", "Latitude", "Longitude", "Alt (m)", "Speed (km/h)", "Δ Speed (km/h)"])
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -178,6 +178,20 @@ class GoProGpsInspector(QMainWindow):
             self._table.setItem(i, 2, QTableWidgetItem(f"{lon:.7f}"))
             self._table.setItem(i, 3, QTableWidgetItem(f"{alt:.1f}"))
             self._table.setItem(i, 4, QTableWidgetItem(f"{spd * 3.6:.1f}"))
+            # Computed speed from position delta
+            if i == 0:
+                self._table.setItem(i, 5, QTableWidgetItem("--"))
+            else:
+                t_prev, lat_prev, lon_prev, _, _ = self._rows[i - 1]
+                dt = t - t_prev
+                if dt > 0:
+                    dlat_m = (lat - lat_prev) * 111320.0
+                    dlon_m = (lon - lon_prev) * 111320.0 * math.cos(math.radians(lat))
+                    dist = math.sqrt(dlat_m**2 + dlon_m**2)
+                    computed_spd = dist / dt * 3.6
+                    self._table.setItem(i, 5, QTableWidgetItem(f"{computed_spd:.1f}"))
+                else:
+                    self._table.setItem(i, 5, QTableWidgetItem("--"))
 
         # Project to local ENU for map
         lat0 = math.radians(gps_data[0][1])
