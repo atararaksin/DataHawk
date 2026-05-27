@@ -24,10 +24,14 @@ _GPS_HEADING_ID = -10
 _MASTER_CLK_ID = 0
 
 
-def parse_gopro(video_path: str | Path) -> XrzSession:
-    """Parse GPS telemetry from a GoPro MP4 file into an XrzSession."""
+def parse_gopro(video_path: str | Path) -> tuple[XrzSession, float]:
+    """Parse GPS telemetry from a GoPro MP4 file into an XrzSession.
+
+    Returns (session, timo_seconds) where timo is the telemetry-to-video offset.
+    Video time = session_time - timo (telemetry starts before video).
+    """
     path = Path(video_path)
-    gps_samples = _extract_gps5(path)
+    gps_samples, timo = _extract_gps5(path)
     if not gps_samples:
         raise ValueError("No GPS data found in GoPro video")
 
@@ -72,14 +76,15 @@ def parse_gopro(video_path: str | Path) -> XrzSession:
         session_type="GoPro",
     )
 
-    return XrzSession(metadata=metadata, channels=channels)
+    return XrzSession(metadata=metadata, channels=channels), timo
 
 
-def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
+def _extract_gps5(path: Path) -> tuple[list[tuple[float, float, float, float]], float]:
     """Extract GPS5 data from GPMF track.
 
-    Returns list of (time_seconds, lat_degrees, lon_degrees, speed_km_h).
+    Returns ([(time_seconds, lat, lon, speed_kmh), ...], timo_seconds).
     Timestamps use actual sample duration from MP4 stts table.
+    TIMO is the telemetry-in/media-out offset (telemetry leads video by this amount).
     """
     from datahawk.video_sync import _find_top_level_box
 
@@ -89,7 +94,7 @@ def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
 
         moov_offset = _find_top_level_box(f, file_size, b"moov")
         if moov_offset < 0:
-            return []
+            return [], 0.0
 
         f.seek(moov_offset)
         moov_size = struct.unpack(">I", f.read(4))[0]
@@ -99,17 +104,23 @@ def _extract_gps5(path: Path) -> list[tuple[float, float, float, float]]:
         # Find GPMF track (includes sample_duration from stts)
         stco_data, stsz_data, sample_count, sample_duration = _find_gpmf_track_from_moov(moov_data)
         if sample_count == 0:
-            return []
+            return [], 0.0
 
         results = []
+        timo = 0.0
         for i in range(sample_count):
             off = struct.unpack(">I", stco_data[i * 4:i * 4 + 4])[0]
             sz = struct.unpack(">I", stsz_data[i * 4:i * 4 + 4])[0]
             f.seek(off)
             sample = f.read(sz)
             _parse_gps5_from_sample(sample, i, sample_duration, results)
+            # Extract TIMO from first sample that has it
+            if timo == 0.0:
+                timo_idx = sample.find(b"TIMO")
+                if timo_idx >= 0 and timo_idx + 12 <= len(sample):
+                    timo = struct.unpack(">f", sample[timo_idx + 8:timo_idx + 12])[0]
 
-    return results
+    return results, timo
 
 
 def _find_gpmf_track_from_moov(moov_data: bytes) -> tuple[bytes, bytes, int, float]:

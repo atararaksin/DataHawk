@@ -92,14 +92,15 @@ class MainWindow(QMainWindow):
             from datahawk.gopro_parser import parse_gopro
             from datahawk.session_processing import process_session
 
-            parsed = parse_gopro(path)
+            parsed, timo = parse_gopro(path)
             parsed.metadata.track = track
             parsed.metadata.date = ""
             session = process_session(parsed)
 
             video_path = Path(path)
             viewer = SessionViewer(
-                video_path, parsed_session=session, video_path=video_path
+                video_path, parsed_session=session, video_path=video_path,
+                video_offset=-timo,
             )
             viewer.setWindowTitle(f"DataHawk — {track} ({driver}) [GoPro]")
             viewer.show()

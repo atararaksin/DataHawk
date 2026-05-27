@@ -25,7 +25,7 @@ from datahawk.sector_detection import populate_sectors
 
 
 class SessionViewer(QMainWindow):
-    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, video_path: Path | None = None):
+    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, video_path: Path | None = None, video_offset: float | None = None):
         super().__init__(parent)
         if parsed_session is not None:
             self._session = parsed_session
@@ -189,8 +189,8 @@ class SessionViewer(QMainWindow):
             self._btn_play.setEnabled(True)
             self._video_slider.setEnabled(True)
             self._player.setPosition(1)
-            # For GoPro sessions, video IS the telemetry source, so offset = 0
-            self._video_offset = 0.0
+            # video_offset from TIMO: video_time = session_time + offset
+            self._video_offset = video_offset if video_offset is not None else 0.0
             self._btn_sync.setEnabled(True)
             self._btn_sync.setChecked(True)
             self._btn_sync.setStyleSheet("background-color: green;")
