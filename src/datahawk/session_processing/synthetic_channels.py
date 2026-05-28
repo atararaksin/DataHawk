@@ -11,7 +11,7 @@ import math
 from datahawk.source.types import SourceSession, SourceChannel
 from datahawk.source.channel_constants import (
     GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING,
-    GPS_LAT_ACC, GPS_LON_ACC, GPS_DISTANCE, LAP_TIME, LAP_DISTANCE,
+    GPS_LAT_ACC, GPS_LON_ACC, GPS_DISTANCE, MASTER_CLK, LAP_TIME, LAP_DISTANCE,
 )
 from datahawk.utils.gps_utils import compute_gps_acceleration
 from datahawk.types import Lap, Channel
