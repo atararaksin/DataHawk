@@ -11,7 +11,7 @@ import math
 
 from datahawk.source.types import SourceSession
 from datahawk.types import Line, Point
-from datahawk.gps_utils import create_perpendecular_line
+from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 
 

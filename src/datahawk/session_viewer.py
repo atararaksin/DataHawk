@@ -20,7 +20,7 @@ from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
-from datahawk.gps_utils import create_perpendecular_line
+from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.sector_detection import populate_sectors
 
@@ -246,7 +246,7 @@ class SessionViewer(QMainWindow):
 
     def _compute_sync(self, video_path: str):
         try:
-            from datahawk.video_sync import sync_by_acceleration, sync_by_timestamp
+            from datahawk.source.gopro.video_sync import sync_by_acceleration, sync_by_timestamp
             from datahawk.source.mychron.xrz_parser import parse_xrz as _parse
 
             # Skip sync computation for GoPro sessions (video IS the telemetry source)

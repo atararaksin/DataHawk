@@ -5,7 +5,7 @@ from __future__ import annotations
 from datahawk.source.types import SourceSession
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING, MASTER_CLK, BEACON
 from datahawk.types import Line, Point
-from datahawk.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
+from datahawk.utils.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
 from datahawk.constants import CROSSING_LINE_LENGTH
 
 

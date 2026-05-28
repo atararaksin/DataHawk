@@ -19,6 +19,7 @@ from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMet
 from datahawk.source.channel_constants import (
     GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
 )
+from datahawk.utils.mp4_utils import find_top_level_box
 
 
 def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
@@ -83,13 +84,12 @@ def _extract_gps5(path: Path) -> tuple[list[tuple[float, float, float, float]], 
     Timestamps account for dropped fixes within samples by detecting position
     jumps via GPS speed comparison and assigning double time gaps at those points.
     """
-    from datahawk.video_sync import _find_top_level_box
 
     with open(path, "rb") as f:
         f.seek(0, 2)
         file_size = f.tell()
 
-        moov_offset = _find_top_level_box(f, file_size, b"moov")
+        moov_offset = find_top_level_box(f, file_size, b"moov")
         if moov_offset < 0:
             return [], 0.0
 
@@ -278,3 +278,92 @@ def _parse_gps5_raw(sample: bytes, out: list[tuple[float, float, float]]) -> Non
         speed_ms = speed2d_raw / scales[3]  # m/s
         speed_kmh = speed_ms * 3.6
         out.append((lat, lon, speed_kmh))
+
+
+
+def extract_gopro_accel_magnitude(path: Path) -> tuple[list[tuple[float, float]], float]:
+    """Extract horizontal acceleration magnitude from GoPro GPMF at ~25Hz.
+
+    Returns (time_value_pairs, timo) where timo is the telemetry-to-video offset.
+    """
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+
+        moov_offset = find_top_level_box(f, file_size, b"moov")
+        if moov_offset < 0:
+            return [], 0.0
+
+        f.seek(moov_offset)
+        moov_size = struct.unpack(">I", f.read(4))[0]
+        f.read(4)  # skip 'moov'
+        moov_data = f.read(moov_size - 8)
+
+        stco_data, stsz_data, sample_count, _ = _find_gpmf_track_from_moov(moov_data)
+        if sample_count == 0:
+            return [], 0.0
+
+        raw = []
+        timo = 0.0
+        for i in range(sample_count):
+            off = struct.unpack(">I", stco_data[i * 4:i * 4 + 4])[0]
+            sz = struct.unpack(">I", stsz_data[i * 4:i * 4 + 4])[0]
+            f.seek(off)
+            sample = f.read(sz)
+            _parse_accl_from_sample(sample, i, raw)
+            # Extract TIMO (telemetry-to-video offset) from first sample that has it
+            if timo == 0.0:
+                timo_idx = sample.find(b"TIMO")
+                if timo_idx >= 0 and timo_idx + 12 <= len(sample):
+                    timo = struct.unpack(">f", sample[timo_idx + 8:timo_idx + 12])[0]
+
+    if not raw:
+        return [], 0.0
+
+    # Low-pass filter: average over 8 samples (200Hz -> 25Hz)
+    window = 8
+    filtered = []
+    for i in range(0, len(raw) - window, window):
+        chunk = raw[i:i + window]
+        t = sum(s[0] for s in chunk) / window
+        a = sum(s[1] for s in chunk) / window
+        b = sum(s[2] for s in chunk) / window
+        filtered.append((t, a, b))
+
+    # Subtract static bias (first 3 seconds = gravity leakage from tilt)
+    cal_n = min(75, len(filtered))
+    bias_a = sum(s[1] for s in filtered[:cal_n]) / cal_n
+    bias_b = sum(s[2] for s in filtered[:cal_n]) / cal_n
+
+    # Horizontal magnitude in g
+    mag = [(t, math.sqrt(((a - bias_a) / 9.81) ** 2 + ((b - bias_b) / 9.81) ** 2))
+           for t, a, b in filtered]
+    return mag, timo
+
+
+def _parse_accl_from_sample(sample: bytes, sample_idx: int, out: list) -> None:
+    """Parse ACCL data from a GPMF sample, append (t, a, b) tuples to out."""
+    accl_idx = sample.find(b"ACCL")
+    if accl_idx < 0:
+        return
+
+    # Find SCAL
+    strm_start = sample.rfind(b"STRM", 0, accl_idx)
+    scal_idx = sample.find(b"SCAL", strm_start if strm_start >= 0 else 0, accl_idx)
+    scale = 418
+    if scal_idx >= 0 and sample[scal_idx + 5] == 2:
+        scale = struct.unpack(">h", sample[scal_idx + 8:scal_idx + 10])[0]
+
+    struct_size = sample[accl_idx + 5]
+    repeat = struct.unpack(">H", sample[accl_idx + 6:accl_idx + 8])[0]
+    if struct_size != 6 or repeat == 0:
+        return
+
+    payload = sample[accl_idx + 8:accl_idx + 8 + 6 * repeat]
+    for j in range(repeat):
+        if (j + 1) * 6 > len(payload):
+            break
+        a, b, c = struct.unpack(">3h", payload[j * 6:(j + 1) * 6])
+        t = sample_idx + j / repeat
+        # a, b are horizontal axes; c is gravity axis
+        out.append((t, a / scale, b / scale))

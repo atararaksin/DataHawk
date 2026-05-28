@@ -6,7 +6,7 @@ import math
 
 from datahawk.types import Session, Lap, Line
 from datahawk.source.channel_constants import MASTER_CLK
-from datahawk.gps_utils import intersection, interpolate_by_gps
+from datahawk.utils.gps_utils import intersection, interpolate_by_gps
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
 
