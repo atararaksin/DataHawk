@@ -60,7 +60,11 @@ def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
         session_type="GoPro",
     )
 
-    return SourceSession(metadata=metadata, channels=channels), timo
+    session = SourceSession(metadata=metadata, channels=channels)
+
+    from datahawk.session_processing.synthetic_channels import add_synthetic_channels
+    add_synthetic_channels(session)
+    return session, timo
 
 
 

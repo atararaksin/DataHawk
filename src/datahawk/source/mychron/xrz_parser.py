@@ -274,4 +274,8 @@ def parse_xrz(path: Union[Path, str]) -> SourceSession:
     result: dict[str, SourceChannel] = {}
     for ch in channels.values():
         result[ch.name] = ch.to_source_channel()
-    return SourceSession(metadata=metadata, channels=result)
+    session = SourceSession(metadata=metadata, channels=result)
+
+    from datahawk.session_processing.synthetic_channels import add_synthetic_channels
+    add_synthetic_channels(session)
+    return session

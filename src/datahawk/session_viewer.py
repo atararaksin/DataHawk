@@ -265,6 +265,7 @@ class SessionViewer(QMainWindow):
 
             parsed = _parse(self._xrz_path)
 
+
             result = sync_by_acceleration(video_path, parsed)
             if result.confidence == "low":
                 ts_result = sync_by_timestamp(video_path, parsed)
