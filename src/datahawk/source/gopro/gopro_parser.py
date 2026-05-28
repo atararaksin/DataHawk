@@ -15,16 +15,13 @@ import math
 import struct
 from pathlib import Path
 
-from datahawk.source.types import SourceChannel as XrzChannel, SourceSession as XrzSession, SourceSessionMetadata as XrzSessionMetadata
-
-_GPS_LAT_ID = -1
-_GPS_LON_ID = -2
-_GPS_SPEED_ID = -3
-_GPS_HEADING_ID = -10
-_MASTER_CLK_ID = 0
+from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
+from datahawk.source.channel_constants import (
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
+)
 
 
-def parse_gopro(video_path: str | Path) -> tuple[XrzSession, float]:
+def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
     """Parse GPS telemetry from a GoPro MP4 file into a SourceSession.
 
     Returns (session, timo_seconds) where timo is the telemetry-to-video offset.
@@ -36,11 +33,11 @@ def parse_gopro(video_path: str | Path) -> tuple[XrzSession, float]:
         raise ValueError("No GPS data found in GoPro video")
 
     # Build channels
-    lat_ch = XrzChannel(id=_GPS_LAT_ID, short_name="GPSLat", long_name="GPS Latitude")
-    lon_ch = XrzChannel(id=_GPS_LON_ID, short_name="GPSLon", long_name="GPS Longitude")
-    speed_ch = XrzChannel(id=_GPS_SPEED_ID, short_name="GPSSpd", long_name="GPS Speed")
-    heading_ch = XrzChannel(id=_GPS_HEADING_ID, short_name="GPSHdg", long_name="GPS Heading")
-    mclk_ch = XrzChannel(id=_MASTER_CLK_ID, short_name="MClk", long_name="Master Clk")
+    lat_ch = SourceChannel(name=GPS_LATITUDE)
+    lon_ch = SourceChannel(name=GPS_LONGITUDE)
+    speed_ch = SourceChannel(name=GPS_SPEED)
+    heading_ch = SourceChannel(name=GPS_HEADING)
+    mclk_ch = SourceChannel(name=MASTER_CLK)
 
     for t, lat, lon, speed in gps_samples:
         lat_ch.append(t, lat)
@@ -62,21 +59,21 @@ def parse_gopro(video_path: str | Path) -> tuple[XrzSession, float]:
         heading_ch.append(gps_samples[i][0], hdg)
 
     channels = {
-        _GPS_LAT_ID: lat_ch,
-        _GPS_LON_ID: lon_ch,
-        _GPS_SPEED_ID: speed_ch,
-        _GPS_HEADING_ID: heading_ch,
-        _MASTER_CLK_ID: mclk_ch,
+        GPS_LATITUDE: lat_ch,
+        GPS_LONGITUDE: lon_ch,
+        GPS_SPEED: speed_ch,
+        GPS_HEADING: heading_ch,
+        MASTER_CLK: mclk_ch,
     }
 
-    metadata = XrzSessionMetadata(
+    metadata = SourceSessionMetadata(
         track="",
         date="",
         time="",
         session_type="GoPro",
     )
 
-    return XrzSession(metadata=metadata, channels=channels), timo
+    return SourceSession(metadata=metadata, channels=channels), timo
 
 
 def _extract_gps5(path: Path) -> tuple[list[tuple[float, float, float, float]], float]:

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from datahawk.source.channel_constants import (
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
+)
+
 
 @dataclass
 class Channel:
@@ -23,6 +27,27 @@ class Lap:
     channels: dict[str, Channel] = field(default_factory=dict)
     sector_times: list[float] = field(default_factory=list)  # duration of each sector (NaN if unknown)
     sector_split_times: list[float] = field(default_factory=list)  # absolute times of sector splits (NaN if unknown)
+
+    @property
+    def gps_lat(self) -> Channel:
+        return self.channels[GPS_LATITUDE]
+
+    @property
+    def gps_lon(self) -> Channel:
+        return self.channels[GPS_LONGITUDE]
+
+    @property
+    def gps_speed(self) -> Channel:
+        return self.channels[GPS_SPEED]
+
+    @property
+    def gps_heading(self) -> Channel:
+        return self.channels[GPS_HEADING]
+
+    @property
+    def master_clk(self) -> Channel:
+        return self.channels[MASTER_CLK]
+
 
 @dataclass
 class Track:

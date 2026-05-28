@@ -9,30 +9,22 @@ from __future__ import annotations
 
 import math
 
-from datahawk.source.mychron.xrz_parser import XrzSession, XrzChannel
+from datahawk.source.types import SourceSession
 from datahawk.types import Line, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 
-_GPS_LAT_ID = -1
-_GPS_LON_ID = -2
-_GPS_SPEED_ID = -3
-_GPS_HEADING_ID = -10
 
-
-def detect_sf_from_max_speed(session: XrzSession) -> Line:
+def detect_sf_from_max_speed(session: SourceSession) -> Line:
     """Detect S/F line by finding max speed point, going back 2s, and drawing perpendicular.
 
     The idea: max speed is typically on the main straight. Going back 2 seconds
     places us near the start of the straight where the S/F line usually is.
     """
-    speed_ch = session.channels.get(_GPS_SPEED_ID)
-    lat_ch = session.channels.get(_GPS_LAT_ID)
-    lon_ch = session.channels.get(_GPS_LON_ID)
-    heading_ch = session.channels.get(_GPS_HEADING_ID)
-
-    if not speed_ch or not lat_ch or not lon_ch or not heading_ch:
-        raise ValueError("Missing GPS channels for S/F detection")
+    speed_ch = session.gps_speed
+    lat_ch = session.gps_lat
+    lon_ch = session.gps_lon
+    heading_ch = session.gps_heading
 
     # Find max speed index
     max_speed = -1.0

@@ -28,7 +28,7 @@ def get_channel_value_in_another_lap_with_interpolation(
     source_lap = source_session.laps[entry.lap_index]
 
     # Get actual Master Clk values at sample_idx and sample_idx+1 in source lap
-    source_mc = source_lap.channels.get("Master Clk")
+    source_mc = source_lap.master_clk
     if not source_mc or sample_idx + 1 >= len(source_mc.samples):
         return float('nan')
 

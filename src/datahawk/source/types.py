@@ -4,20 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from datahawk.source.channel_constants import (
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
+)
+
 
 @dataclass
 class SourceChannel:
     """A telemetry channel definition."""
-    id: int
-    short_name: str
-    long_name: str
-    is_float16: bool = True
+    name: str
     timestamps: list[float] = field(default_factory=list, repr=False)
     values: list[float] = field(default_factory=list, repr=False)
-
-    @property
-    def name(self) -> str:
-        return self.long_name or self.short_name
 
     def append(self, ts: float, val: float) -> None:
         self.timestamps.append(ts)
@@ -49,4 +46,24 @@ class SourceSessionMetadata:
 class SourceSession:
     """Complete parsed session from any telemetry source."""
     metadata: SourceSessionMetadata
-    channels: dict[int, SourceChannel]
+    channels: dict[str, SourceChannel] = field(default_factory=dict)
+
+    @property
+    def gps_lat(self) -> SourceChannel:
+        return self.channels[GPS_LATITUDE]
+
+    @property
+    def gps_lon(self) -> SourceChannel:
+        return self.channels[GPS_LONGITUDE]
+
+    @property
+    def gps_speed(self) -> SourceChannel:
+        return self.channels[GPS_SPEED]
+
+    @property
+    def gps_heading(self) -> SourceChannel:
+        return self.channels[GPS_HEADING]
+
+    @property
+    def master_clk(self) -> SourceChannel:
+        return self.channels[MASTER_CLK]
