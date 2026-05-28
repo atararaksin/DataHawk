@@ -10,7 +10,7 @@ from typing import Optional
 from datahawk.source.types import SourceSession, SourceChannel
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK, BEACON
 from datahawk.session_processing.lap_detection import detect_sf_from_mychron_beacon, detect_laps, detect_sf_from_max_speed
-from datahawk.session_processing.synthetic_channels import add_synthetic_channels
+from datahawk.session_processing.synthetic_channels import add_synthetic_channels, add_lap_level_synthetic_channels
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
 
 
@@ -247,6 +247,10 @@ def process_session(parsed: SourceSession) -> Session:
                 )
 
         session.laps.append(lap)
+
+    # Add lap-level synthetic channels
+    for lap in session.laps:
+        add_lap_level_synthetic_channels(lap)
 
     # Build temporal index
     session.temporal_index = _build_temporal_index(session)

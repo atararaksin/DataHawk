@@ -15,6 +15,8 @@ GPS_DISTANCE = "GPS Distance"
 
 # Timing
 MASTER_CLK = "Master Clk"
+LAP_TIME = "Lap Time"
+LAP_DISTANCE = "Lap Distance"
 
 # MyChron beacon (ch4 -- lap marker)
 BEACON = "Beacon"

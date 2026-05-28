@@ -11,9 +11,10 @@ import math
 from datahawk.source.types import SourceSession, SourceChannel
 from datahawk.source.channel_constants import (
     GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING,
-    GPS_LAT_ACC, GPS_LON_ACC, GPS_DISTANCE,
+    GPS_LAT_ACC, GPS_LON_ACC, GPS_DISTANCE, LAP_TIME, LAP_DISTANCE,
 )
 from datahawk.utils.gps_utils import compute_gps_acceleration
+from datahawk.types import Lap, Channel
 
 
 def add_synthetic_channels(session: SourceSession) -> None:
@@ -90,3 +91,30 @@ def _add_gps_distance(session: SourceSession) -> None:
         cum_dist += math.sqrt(dlat ** 2 + dlon ** 2)
         dist_ch.append(times[i], cum_dist)
     session.channels[GPS_DISTANCE] = dist_ch
+
+
+def add_lap_level_synthetic_channels(lap: Lap) -> None:
+    """Add Lap Time and Lap Distance channels to a processed lap."""
+    mc = lap.channels.get(MASTER_CLK)
+    if mc and mc.samples:
+        t0 = mc.samples[0]
+        lap_time_ch = Channel(
+            name=LAP_TIME,
+            samples=[s - t0 if not math.isnan(s) else float('nan') for s in mc.samples],
+            raw_timestamps=list(mc.raw_timestamps),
+            raw_values=[v - mc.raw_values[0] if mc.raw_values and not math.isnan(v) else float('nan')
+                        for v in mc.raw_values],
+        )
+        lap.channels[LAP_TIME] = lap_time_ch
+
+    dist = lap.channels.get(GPS_DISTANCE)
+    if dist and dist.samples:
+        d0 = dist.samples[0]
+        lap_dist_ch = Channel(
+            name=LAP_DISTANCE,
+            samples=[s - d0 if not math.isnan(s) else float('nan') for s in dist.samples],
+            raw_timestamps=list(dist.raw_timestamps),
+            raw_values=[v - dist.raw_values[0] if dist.raw_values and not math.isnan(v) else float('nan')
+                        for v in dist.raw_values],
+        )
+        lap.channels[LAP_DISTANCE] = lap_dist_ch
