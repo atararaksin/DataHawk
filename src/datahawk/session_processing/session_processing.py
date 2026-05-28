@@ -9,8 +9,7 @@ from typing import Optional
 
 from datahawk.source.types import SourceSession, SourceChannel
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK, BEACON
-from datahawk.lap_detection import detect_start_finish_fine, detect_laps
-from datahawk.gopro_sf_detection import detect_sf_from_max_speed
+from datahawk.session_processing.lap_detection import detect_sf_from_mychron_beacon, detect_laps, detect_sf_from_max_speed
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
 
 
@@ -86,10 +85,10 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
 
 def process_session(parsed: SourceSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
-    # Use ch4-based S/F detection if available, otherwise GoPro max-speed method
+    # Use ch4-based S/F detection if available, otherwise max-speed method
     ch4 = parsed.channels.get(BEACON)
     if ch4 and ch4.timestamps:
-        sf_line = detect_start_finish_fine(parsed)
+        sf_line = detect_sf_from_mychron_beacon(parsed, ch4)
     else:
         sf_line = detect_sf_from_max_speed(parsed)
 

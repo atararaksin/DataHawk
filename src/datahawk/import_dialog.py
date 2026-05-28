@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QProgressBar, QLineEdit,
 )
 
-from datahawk.mychron import check_device, list_sessions, download_session, Session
+from datahawk.source.mychron.mychron import check_device, list_sessions, download_session, Session
 from datahawk.storage import save_session, get_imported_filenames
 from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.session_processing import process_session

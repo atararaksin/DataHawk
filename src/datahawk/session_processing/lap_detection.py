@@ -1,9 +1,11 @@
-"""Lap detection from XRZ channel 4 data + GPS S/F line crossing."""
+"""Lap detection: S/F line detection and GPS crossing detection."""
 
 from __future__ import annotations
 
-from datahawk.source.types import SourceSession
-from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING, MASTER_CLK, BEACON
+import math
+
+from datahawk.source.types import SourceSession, SourceChannel
+from datahawk.source.channel_constants import BEACON
 from datahawk.types import Line, Point
 from datahawk.utils.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
 from datahawk.constants import CROSSING_LINE_LENGTH
@@ -27,11 +29,11 @@ def get_sf_timestamps_based_on_ch4(session: SourceSession) -> list[float]:
     return times
 
 
-def detect_start_finish_fine(session: SourceSession) -> Line:
-    """Detect start/finish line coordinates from ch4 markers + GPS heading."""
+def detect_sf_from_mychron_beacon(session: SourceSession, beacon_ch: SourceChannel) -> Line:
+    """Detect start/finish line coordinates from MyChron beacon timestamps + GPS heading."""
     start_finish_times = get_sf_timestamps_based_on_ch4(session)
     if not start_finish_times:
-        raise ValueError("Couldn't detect start/finish line from ch4")
+        raise ValueError("Couldn't detect start/finish line from beacon")
 
     lat_ch = session.gps_lat
     lon_ch = session.gps_lon
@@ -48,6 +50,53 @@ def detect_start_finish_fine(session: SourceSession) -> Line:
         raise ValueError("Couldn't detect start/finish line")
 
     return mad_average_of_lines(lines)
+
+
+def detect_sf_from_max_speed(session: SourceSession) -> Line:
+    """Detect S/F line by finding max speed point, going back 2s, and drawing perpendicular.
+
+    The idea: max speed is typically on the main straight. Going back 2 seconds
+    places us near the start of the straight where the S/F line usually is.
+    """
+    speed_ch = session.gps_speed
+    lat_ch = session.gps_lat
+    lon_ch = session.gps_lon
+    heading_ch = session.gps_heading
+
+    # Find max speed index
+    max_speed = -1.0
+    max_idx = 0
+    for i, v in enumerate(speed_ch.values):
+        if v > max_speed:
+            max_speed = v
+            max_idx = i
+
+    # Go back 2 seconds from max speed point
+    max_time = speed_ch.timestamps[max_idx]
+    target_time = max_time - 2.0
+
+    # Find the sample closest to target_time
+    sf_idx = 0
+    for i, t in enumerate(speed_ch.timestamps):
+        if t >= target_time:
+            sf_idx = i
+            break
+
+    lat = lat_ch.values[sf_idx]
+    lon = lon_ch.values[sf_idx]
+    heading = heading_ch.values[sf_idx]
+
+    # If heading is NaN at this point, search forward for valid heading
+    while math.isnan(heading) and sf_idx < len(heading_ch.values) - 1:
+        sf_idx += 1
+        heading = heading_ch.values[sf_idx]
+        lat = lat_ch.values[sf_idx]
+        lon = lon_ch.values[sf_idx]
+
+    if math.isnan(heading):
+        raise ValueError("Could not find valid heading for S/F line placement")
+
+    return create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
 
 
 def detect_laps(session: SourceSession, sf_line: Line) -> list[float]:

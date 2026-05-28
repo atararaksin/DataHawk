@@ -22,7 +22,7 @@ from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
-from datahawk.sector_detection import populate_sectors
+from datahawk.session_processing import populate_sectors
 
 
 class SessionViewer(QMainWindow):
