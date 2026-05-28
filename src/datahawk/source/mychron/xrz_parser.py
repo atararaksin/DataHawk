@@ -36,11 +36,6 @@ def _ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float]
     return lat, lon
 
 
-# Backward-compatible aliases
-XrzChannel = SourceChannel
-XrzSessionMetadata = SourceSessionMetadata
-XrzSession = SourceSession
-
 
 # Internal parsing helper -- tracks is_float16 which SourceChannel doesn't need
 from dataclasses import dataclass, field
@@ -108,10 +103,10 @@ def _parse_channels(dec: bytes) -> dict[int, _ParseChannel]:
     return channels
 
 
-def _parse_metadata(dec: bytes) -> XrzSessionMetadata:
+def _parse_metadata(dec: bytes) -> SourceSessionMetadata:
     """Extract session metadata from header blocks."""
     import re
-    meta = XrzSessionMetadata()
+    meta = SourceSessionMetadata()
 
     # Track code from TRK block
     idx = dec.find(b"<hTRK ")
