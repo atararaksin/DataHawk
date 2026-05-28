@@ -9,7 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
-    QPushButton, QFileDialog, QSlider, QMessageBox,
+    QPushButton, QFileDialog, QSlider, QMessageBox, QCheckBox,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QBrush, QColor
@@ -125,6 +125,9 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
+        self._diff_cb = QCheckBox("Diff")
+        self._diff_cb.stateChanged.connect(self._update_plot)
+        top_row.addWidget(self._diff_cb)
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
@@ -533,30 +536,55 @@ class SessionViewer(QMainWindow):
             return
 
         ch = lap.channels[ch_name]
-
-        # Current lap: use raw (uninterpolated) data for full coverage
-        times = ch.raw_timestamps
-        samples = ch.raw_values
-
-        self._plot.setLabel("left", ch_name)
-        self._plot.plot(times, samples, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
-
-        # Reference lap overlay: use current lap's reindexed time axis + ref's reindexed values
         ref_sel = self._ref_combo.currentIndex() - 1
-        if ref_sel >= 0 and ref_sel != lap_idx:
-            ref_lap = self._session.laps[ref_sel]
-            if ch_name in ref_lap.channels:
-                mc = lap.master_clk
-                if mc:
-                    t0 = lap.lap_start_time
-                    ref_times = []
-                    ref_samples = []
-                    for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
-                        if t == t and v == v:  # skip NaN
-                            ref_times.append(t - t0)
-                            ref_samples.append(v)
-                    if ref_times:
-                        self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_sel + 1}")
+
+        if self._diff_cb.isChecked():
+            # Diff mode: current - ref, using reindexed samples
+            mc = lap.master_clk
+            if not mc:
+                return
+            t0 = lap.lap_start_time
+            ref_lap = self._session.laps[ref_sel] if ref_sel >= 0 and ref_sel != lap_idx else None
+            ref_ch = ref_lap.channels.get(ch_name) if ref_lap else None
+
+            diff_times = []
+            diff_values = []
+            for i, (t, cur_v) in enumerate(zip(mc.samples, ch.samples)):
+                if math.isnan(t) or math.isnan(cur_v):
+                    continue
+                if ref_ch and i < len(ref_ch.samples) and not math.isnan(ref_ch.samples[i]):
+                    diff_times.append(t - t0)
+                    diff_values.append(cur_v - ref_ch.samples[i])
+                else:
+                    diff_times.append(t - t0)
+                    diff_values.append(float('nan'))
+
+            self._plot.setLabel("left", f"{ch_name} (diff)")
+            if diff_times:
+                self._plot.plot(diff_times, diff_values, pen=pg.mkPen("c", width=1), name="Diff")
+        else:
+            # Normal mode: current lap + optional ref overlay
+            times = ch.raw_timestamps
+            samples = ch.raw_values
+
+            self._plot.setLabel("left", ch_name)
+            self._plot.plot(times, samples, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
+
+            # Reference lap overlay
+            if ref_sel >= 0 and ref_sel != lap_idx:
+                ref_lap = self._session.laps[ref_sel]
+                if ch_name in ref_lap.channels:
+                    mc = lap.master_clk
+                    if mc:
+                        t0 = lap.lap_start_time
+                        ref_times = []
+                        ref_samples = []
+                        for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
+                            if t == t and v == v:  # skip NaN
+                                ref_times.append(t - t0)
+                                ref_samples.append(v)
+                        if ref_times:
+                            self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_sel + 1}")
 
         # Sector split lines
         s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),
