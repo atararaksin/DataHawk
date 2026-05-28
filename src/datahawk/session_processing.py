@@ -7,7 +7,8 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Optional
 
-from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
+from datahawk.source.types import SourceSession, SourceChannel
+from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK, BEACON
 from datahawk.lap_detection import detect_start_finish_fine, detect_laps
 from datahawk.gopro_sf_detection import detect_sf_from_max_speed
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track
@@ -83,10 +84,10 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
     return values[lo] + frac * (values[hi] - values[lo])
 
 
-def process_session(parsed: XrzSession) -> Session:
+def process_session(parsed: SourceSession) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
     # Use ch4-based S/F detection if available, otherwise GoPro max-speed method
-    ch4 = parsed.channels.get(4)
+    ch4 = parsed.channels.get(BEACON)
     if ch4 and ch4.timestamps:
         sf_line = detect_start_finish_fine(parsed)
     else:
@@ -94,9 +95,9 @@ def process_session(parsed: XrzSession) -> Session:
 
     crossings = detect_laps(parsed, sf_line)
 
-    lat_ch = parsed.channels.get(-1)
-    lon_ch = parsed.channels.get(-2)
-    speed_ch = parsed.channels.get(-3)
+    lat_ch = parsed.channels.get(GPS_LATITUDE)
+    lon_ch = parsed.channels.get(GPS_LONGITUDE)
+    speed_ch = parsed.channels.get(GPS_SPEED)
 
     if len(crossings) < 2 or not lat_ch or not lon_ch:
         return Session(
@@ -110,7 +111,7 @@ def process_session(parsed: XrzSession) -> Session:
         )
 
     # Build full boundary list: session_start, crossings..., session_end
-    mclk_ch = parsed.channels.get(0)
+    mclk_ch = parsed.channels.get(MASTER_CLK)
     session_start_time = mclk_ch.timestamps[0] if mclk_ch and mclk_ch.timestamps else crossings[0]
     session_end_time = mclk_ch.timestamps[-1] if mclk_ch and mclk_ch.timestamps else crossings[-1]
     boundaries = [session_start_time] + list(crossings) + [session_end_time]
@@ -149,10 +150,7 @@ def process_session(parsed: XrzSession) -> Session:
     ref_y = [(lat - ref_lats[0]) * 111000 for lat in ref_lats]
 
     # Collect all channel names we want to reindex
-    channel_names = {}
-    for ch_id, ch in parsed.channels.items():
-        if ch.timestamps:
-            channel_names[ch_id] = ch.name
+    channel_names = [name for name, ch in parsed.channels.items() if ch.timestamps]
 
     # Process each lap
     session = Session(
@@ -174,8 +172,8 @@ def process_session(parsed: XrzSession) -> Session:
 
         if lap_start_time == ref_start:
             # Reference lap: time-based interpolation (uniform time samples)
-            for ch_id, ch_name in channel_names.items():
-                ch = parsed.channels[ch_id]
+            for ch_name in channel_names:
+                ch = parsed.channels[ch_name]
                 lo_i = max(0, bisect_left(ch.timestamps, ref_start) - 1)
                 hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, ref_end) + 1)
                 ch_times = ch.timestamps[lo_i:hi_i]
@@ -195,8 +193,8 @@ def process_session(parsed: XrzSession) -> Session:
             # line through that ref point (normal to ref trajectory)
             lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
             if len(lap_gps_idx) < 10:
-                for ch_id, ch_name in channel_names.items():
-                    ch = parsed.channels[ch_id]
+                for ch_name in channel_names:
+                    ch = parsed.channels[ch_name]
                     lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
                     hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
                     lap.channels[ch_name] = Channel(
@@ -221,8 +219,8 @@ def process_session(parsed: XrzSession) -> Session:
             fracs = _find_nearest_points(ref_x, ref_y, lap_x, lap_y, MAX_RADIUS)
 
             # Interpolate all channels using the crossing fractions
-            for ch_id, ch_name in channel_names.items():
-                ch = parsed.channels[ch_id]
+            for ch_name in channel_names:
+                ch = parsed.channels[ch_name]
                 lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
                 hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
                 ch_times = ch.timestamps[lo_i:hi_i]
@@ -284,7 +282,7 @@ def _build_temporal_index(session: Session) -> list[TemporalIndexEntry]:
 
         # Advance sample index within current lap's reindexed Master Clk
         lap = session.laps[current_lap_idx]
-        mc = lap.channels.get("Master Clk")
+        mc = lap.master_clk
         if mc:
             # Advance pointer to the sample closest to t
             while (current_sample_idx < len(mc.samples) - 1):

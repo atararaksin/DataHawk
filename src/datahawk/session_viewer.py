@@ -16,7 +16,8 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from datahawk.xrz_parser import parse_xrz
+from datahawk.source.mychron.xrz_parser import parse_xrz
+from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
@@ -158,8 +159,8 @@ class SessionViewer(QMainWindow):
             for name in sorted(self._session.laps[0].channels.keys()):
                 self._combo.addItem(name)
                 self._channel_names.append(name)
-            if "GPS Speed" in self._channel_names:
-                self._combo.setCurrentIndex(self._channel_names.index("GPS Speed"))
+            if GPS_SPEED in self._channel_names:
+                self._combo.setCurrentIndex(self._channel_names.index(GPS_SPEED))
 
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
@@ -246,7 +247,7 @@ class SessionViewer(QMainWindow):
     def _compute_sync(self, video_path: str):
         try:
             from datahawk.video_sync import sync_by_acceleration, sync_by_timestamp
-            from datahawk.xrz_parser import parse_xrz as _parse
+            from datahawk.source.mychron.xrz_parser import parse_xrz as _parse
 
             # Skip sync computation for GoPro sessions (video IS the telemetry source)
             if self._initial_video_path:
@@ -397,7 +398,7 @@ class SessionViewer(QMainWindow):
 
         # Look up the same spatial position in target lap's Master Clk
         target_lap = self._session.laps[lap_idx]
-        target_mc = target_lap.channels.get("Master Clk")
+        target_mc = target_lap.master_clk
         if target_mc and sample_idx < len(target_mc.samples):
             t = target_mc.samples[sample_idx]
             if not math.isnan(t):
@@ -452,7 +453,7 @@ class SessionViewer(QMainWindow):
 
         # Check if within track limits using Master Clk continuity on current lap
         current_lap = self._session.laps[self._active_lap_idx]
-        mc_ch = current_lap.channels.get("Master Clk")
+        mc_ch = current_lap.master_clk
         if mc_ch and sample_idx + 1 < len(mc_ch.samples):
             if math.isnan(mc_ch.samples[sample_idx]) or math.isnan(mc_ch.samples[sample_idx + 1]):
                 QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
@@ -460,9 +461,9 @@ class SessionViewer(QMainWindow):
 
         # Get reference lap's lat/lon/heading at this spatial position
         ref_lap = self._session.laps[self._session.reference_lap_index]
-        lat_ch = ref_lap.channels.get("GPS Latitude")
-        lon_ch = ref_lap.channels.get("GPS Longitude")
-        heading_ch = ref_lap.channels.get("GPS Heading")
+        lat_ch = ref_lap.gps_lat
+        lon_ch = ref_lap.gps_lon
+        heading_ch = ref_lap.gps_heading
 
         if not (lat_ch and lon_ch and heading_ch):
             QMessageBox.warning(self, "Error", "Can't split sector here - missing GPS channels")
@@ -545,7 +546,7 @@ class SessionViewer(QMainWindow):
         if ref_sel >= 0 and ref_sel != lap_idx:
             ref_lap = self._session.laps[ref_sel]
             if ch_name in ref_lap.channels:
-                mc = lap.channels.get("Master Clk")
+                mc = lap.master_clk
                 if mc:
                     t0 = lap.lap_start_time
                     ref_times = []

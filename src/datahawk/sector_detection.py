@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from datahawk.types import Session, Lap, Line
+from datahawk.source.channel_constants import MASTER_CLK
 from datahawk.gps_utils import intersection, interpolate_by_gps
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
@@ -21,9 +22,9 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
         return []
 
     ref_lap = session.laps[session.reference_lap_index]
-    lat_ch = ref_lap.channels.get("GPS Latitude")
-    lon_ch = ref_lap.channels.get("GPS Longitude")
-    mc_ch = ref_lap.channels.get("Master Clk")
+    lat_ch = ref_lap.gps_lat
+    lon_ch = ref_lap.gps_lon
+    mc_ch = ref_lap.master_clk
 
     if not (lat_ch and lon_ch and mc_ch):
         return []
@@ -72,7 +73,7 @@ def calculate_sector_split_times(session: Session, reference_lap_sector_split_ti
     lap_split_times: list[float] = []
     for ref_time in reference_lap_sector_split_times:
         t = get_channel_value_in_another_lap_with_interpolation(
-            session, ref_time, lap, "Master Clk"
+            session, ref_time, lap, MASTER_CLK
         )
         lap_split_times.append(t)
     return lap_split_times

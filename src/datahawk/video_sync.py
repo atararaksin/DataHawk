@@ -13,10 +13,8 @@ import struct
 from pathlib import Path
 from typing import NamedTuple
 
-from datahawk.xrz_parser import XrzSession
-
-_GPS_LATACC_ID = -7
-_GPS_LONACC_ID = -8
+from datahawk.source.types import SourceSession
+from datahawk.source.channel_constants import GPS_LAT_ACC, GPS_LON_ACC
 
 
 class SyncResult(NamedTuple):
@@ -27,7 +25,7 @@ class SyncResult(NamedTuple):
     method: str  # "accel" or "timestamp"
 
 
-def sync_by_acceleration(video_path: str | Path, session: XrzSession) -> SyncResult:
+def sync_by_acceleration(video_path: str | Path, session: SourceSession) -> SyncResult:
     """Find time offset between a GoPro MP4 and a MyChron session.
 
     Uses horizontal acceleration magnitude cross-correlation.
@@ -58,7 +56,7 @@ def sync_by_acceleration(video_path: str | Path, session: XrzSession) -> SyncRes
     return SyncResult(offset_seconds=offset_s, correlation=corr, confidence=confidence, method="accel")
 
 
-def sync_by_timestamp(video_path: str | Path, session: XrzSession) -> SyncResult:
+def sync_by_timestamp(video_path: str | Path, session: SourceSession) -> SyncResult:
     """Find time offset using MP4 creation timestamp vs MyChron session start.
 
     Requires the camera's clock to be GPS-synced (accurate).
@@ -298,10 +296,10 @@ def _parse_accl_from_sample(sample: bytes, sample_idx: int, out: list) -> None:
         out.append((t, a / scale, b / scale))
 
 
-def _compute_mycron_accel_magnitude(session: XrzSession) -> list[tuple[float, float]]:
+def _compute_mycron_accel_magnitude(session: SourceSession) -> list[tuple[float, float]]:
     """Compute horizontal acceleration magnitude from MyChron GPS data."""
-    lat_ch = session.channels.get(_GPS_LATACC_ID)
-    lon_ch = session.channels.get(_GPS_LONACC_ID)
+    lat_ch = session.channels.get(GPS_LAT_ACC)
+    lon_ch = session.channels.get(GPS_LON_ACC)
 
     if not lat_ch or not lon_ch:
         raise ValueError("Session missing GPS Lat Acc / Lon Acc channels")
