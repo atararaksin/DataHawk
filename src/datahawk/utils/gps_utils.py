@@ -99,3 +99,42 @@ def mad_average_of_lines(lines: list[Line]) -> Line:
     avg_b_lat = sum(l.b.lat for l in filtered) / len(filtered)
     avg_b_lon = sum(l.b.lon for l in filtered) / len(filtered)
     return Line(a=Point(avg_a_lat, avg_a_lon), b=Point(avg_b_lat, avg_b_lon))
+
+
+def compute_gps_acceleration(speed_ch, heading_ch):
+    """Compute lateral/longitudinal acceleration from GPS speed and heading.
+
+    Returns (lat_acc_pairs, lon_acc_pairs) as lists of (timestamp, value_in_g).
+    Works with any channel-like object that has .timestamps, .values, and
+    .get_value_at_time_with_interpolation().
+    """
+    lat_acc = []
+    lon_acc = []
+
+    N = 5  # smoothing half-window
+    for i in range(N, len(speed_ch.timestamps) - N):
+        t_i = speed_ch.timestamps[i]
+        dt = speed_ch.timestamps[i + N] - speed_ch.timestamps[i - N]
+        if dt <= 0:
+            continue
+
+        # Longitudinal = dSpeed/dt
+        ds = (speed_ch.values[i + N] - speed_ch.values[i - N]) / 3.6
+        lon_g = (ds / dt) / 9.81
+
+        # Lateral = speed * dHeading/dt
+        h0 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i - N])
+        h1 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i + N])
+        if math.isnan(h0) or math.isnan(h1):
+            continue
+        dh = math.radians(h1) - math.radians(h0)
+        if dh > math.pi: dh -= 2 * math.pi
+        if dh < -math.pi: dh += 2 * math.pi
+
+        spd_ms = speed_ch.values[i] / 3.6
+        lat_g = (spd_ms * dh / dt) / 9.81
+
+        lat_acc.append((t_i, lat_g))
+        lon_acc.append((t_i, lon_g))
+
+    return lat_acc, lon_acc

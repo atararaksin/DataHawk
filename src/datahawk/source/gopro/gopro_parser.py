@@ -17,8 +17,7 @@ from pathlib import Path
 
 from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
 from datahawk.source.channel_constants import (
-    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
-    GPS_LAT_ACC, GPS_LON_ACC,
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK,
 )
 from datahawk.utils.mp4_utils import find_top_level_box
 
@@ -38,7 +37,6 @@ def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
     lat_ch = SourceChannel(name=GPS_LATITUDE)
     lon_ch = SourceChannel(name=GPS_LONGITUDE)
     speed_ch = SourceChannel(name=GPS_SPEED)
-    heading_ch = SourceChannel(name=GPS_HEADING)
     mclk_ch = SourceChannel(name=MASTER_CLK)
 
     for t, lat, lon, speed in gps_samples:
@@ -47,29 +45,13 @@ def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
         speed_ch.append(t, speed)
         mclk_ch.append(t, t)
 
-    # Compute heading from position deltas (gap=5, threshold 2.5 km/h)
-    gap = 5
-    for i in range(len(gps_samples)):
-        if i < gap or speed_ch.values[i] < 2.5:
-            heading_ch.append(gps_samples[i][0], float('nan'))
-            continue
-        lat1, lon1 = lat_ch.values[i - gap], lon_ch.values[i - gap]
-        lat2, lon2 = lat_ch.values[i], lon_ch.values[i]
-        dlat = (lat2 - lat1) * 111320
-        dlon = (lon2 - lon1) * 111320 * math.cos(math.radians(lat1))
-        hdg = math.degrees(math.atan2(dlon, dlat)) % 360
-        heading_ch.append(gps_samples[i][0], hdg)
-
     channels = {
         GPS_LATITUDE: lat_ch,
         GPS_LONGITUDE: lon_ch,
         GPS_SPEED: speed_ch,
-        GPS_HEADING: heading_ch,
         MASTER_CLK: mclk_ch,
     }
 
-    # Extract hardware accelerometer channels from GPMF ACCL
-    _extract_accel_channels(path, channels)
 
     metadata = SourceSessionMetadata(
         track="",
@@ -81,166 +63,6 @@ def parse_gopro(video_path: str | Path) -> tuple[SourceSession, float]:
     return SourceSession(metadata=metadata, channels=channels), timo
 
 
-
-def _extract_accel_channels(path: Path, channels: dict[str, SourceChannel]) -> None:
-    """Extract accelerometer channels from GoPro GPMF ACCL data.
-
-    Resamples 200Hz ACCL to GPS timestamps by averaging all raw samples within
-    each GPS interval. Then applies full 3D rotation: pitch/roll from gravity
-    vector, yaw from auto-calibration.
-    """
-    # Need GPS timestamps to resample to
-    gps_ch = channels.get(GPS_LATITUDE)
-    if not gps_ch or len(gps_ch.timestamps) < 10:
-        return
-
-    with open(path, "rb") as f:
-        f.seek(0, 2)
-        file_size = f.tell()
-
-        moov_offset = find_top_level_box(f, file_size, b"moov")
-        if moov_offset < 0:
-            return
-
-        f.seek(moov_offset)
-        moov_size = struct.unpack(">I", f.read(4))[0]
-        f.read(4)  # skip 'moov'
-        moov_data = f.read(moov_size - 8)
-
-        stco_data, stsz_data, sample_count, sample_duration = _find_gpmf_track_from_moov(moov_data)
-        if sample_count == 0:
-            return
-
-        raw = []
-        for i in range(sample_count):
-            off = struct.unpack(">I", stco_data[i * 4:i * 4 + 4])[0]
-            sz = struct.unpack(">I", stsz_data[i * 4:i * 4 + 4])[0]
-            f.seek(off)
-            sample = f.read(sz)
-            _parse_accl_from_sample(sample, i, raw)
-
-    if not raw:
-        return
-
-    # Convert raw sample-index times to seconds
-    raw_with_time = [(s[0] * sample_duration, s[1], s[2], s[3]) for s in raw]
-
-    # Resample to GPS timestamps: average all ACCL samples within each GPS interval
-    gps_times = gps_ch.timestamps
-    filtered = []
-    raw_idx = 0
-    n_raw = len(raw_with_time)
-
-    for gi in range(len(gps_times)):
-        # Interval: midpoint between prev and current GPS fix to midpoint between current and next
-        t_lo = (gps_times[gi - 1] + gps_times[gi]) / 2 if gi > 0 else 0.0
-        t_hi = (gps_times[gi] + gps_times[gi + 1]) / 2 if gi < len(gps_times) - 1 else gps_times[gi] + 0.1
-
-        # Advance to start of window
-        while raw_idx < n_raw and raw_with_time[raw_idx][0] < t_lo:
-            raw_idx += 1
-
-        # Collect samples in window
-        sum_a, sum_b, sum_c, count = 0.0, 0.0, 0.0, 0
-        j = raw_idx
-        while j < n_raw and raw_with_time[j][0] < t_hi:
-            sum_a += raw_with_time[j][1]
-            sum_b += raw_with_time[j][2]
-            sum_c += raw_with_time[j][3]
-            count += 1
-            j += 1
-
-        if count > 0:
-            filtered.append((gps_times[gi], sum_a / count, sum_b / count, sum_c / count))
-
-    if not filtered:
-        return
-
-    # Determine pitch/roll from gravity vector (static bias over first 3s)
-    # ~18Hz * 3s ≈ 54 samples
-    cal_n = min(54, len(filtered))
-    g_a = sum(s[1] for s in filtered[:cal_n]) / cal_n
-    g_b = sum(s[2] for s in filtered[:cal_n]) / cal_n
-    g_c = sum(s[3] for s in filtered[:cal_n]) / cal_n
-    g_mag = math.sqrt(g_a * g_a + g_b * g_b + g_c * g_c)
-    if g_mag < 0.1:
-        return
-
-    # Rotation matrix to align gravity vector with world Z (down)
-    gx, gy, gz = g_a / g_mag, g_b / g_mag, g_c / g_mag
-    cos_angle = gz
-    if cos_angle > 0.9999:
-        rot = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
-    elif cos_angle < -0.9999:
-        rot = ((-1, 0, 0), (0, -1, 0), (0, 0, -1))
-    else:
-        kx, ky = gy, -gx
-        k_mag = math.sqrt(kx * kx + ky * ky)
-        kx, ky = kx / k_mag, ky / k_mag
-        sin_angle = math.sqrt(1 - cos_angle * cos_angle)
-        c_a = cos_angle
-        omc = 1 - c_a
-        rot = (
-            (c_a + kx * kx * omc,    kx * ky * omc,         ky * sin_angle),
-            (kx * ky * omc,          c_a + ky * ky * omc,   -kx * sin_angle),
-            (-ky * sin_angle,        kx * sin_angle,         c_a),
-        )
-
-    # Apply pitch/roll rotation to remove gravity, get world-horizontal accelerations
-    world_samples = []
-    for t, a, b, c in filtered:
-        a -= g_a
-        b -= g_b
-        c -= g_c
-        wx = rot[0][0] * a + rot[0][1] * b + rot[0][2] * c
-        wy = rot[1][0] * a + rot[1][1] * b + rot[1][2] * c
-        world_samples.append((t, wx, wy))
-
-    # Auto-calibrate yaw (mounting offset around vertical axis)
-    mounting_offset = _calibrate_mounting_offset(world_samples)
-
-    # Rotate by yaw offset to get track-aligned lat/lon
-    lat_acc = SourceChannel(name=GPS_LAT_ACC)
-    lon_acc = SourceChannel(name=GPS_LON_ACC)
-
-    cos_off = math.cos(mounting_offset)
-    sin_off = math.sin(mounting_offset)
-
-    for t_sec, wx, wy in world_samples:
-        lon_g = wx * cos_off + wy * sin_off
-        lat_g = -wx * sin_off + wy * cos_off
-        lat_acc.append(t_sec, lat_g / 9.81)
-        lon_acc.append(t_sec, lon_g / 9.81)
-
-    if lat_acc.timestamps:
-        channels[GPS_LAT_ACC] = lat_acc
-        channels[GPS_LON_ACC] = lon_acc
-
-
-def _calibrate_mounting_offset(world_samples: list[tuple[float, float, float]]) -> float:
-    """Find camera yaw offset by minimizing lateral G during braking events.
-
-    Searches 360 degrees in 1-degree steps on world-horizontal samples.
-    """
-    braking_samples = [(wx, wy) for _, wx, wy in world_samples
-                       if math.sqrt(wx * wx + wy * wy) > 0.3 * 9.81]
-
-    if len(braking_samples) < 20:
-        return 0.0
-
-    best_offset = 0.0
-    best_cost = float('inf')
-
-    for deg in range(360):
-        rad = math.radians(deg)
-        cos_r = math.cos(rad)
-        sin_r = math.sin(rad)
-        cost = sum((-wx * sin_r + wy * cos_r) ** 2 for wx, wy in braking_samples)
-        if cost < best_cost:
-            best_cost = cost
-            best_offset = rad
-
-    return best_offset
 
 
 def _extract_gps5(path: Path) -> tuple[list[tuple[float, float, float, float]], float]:

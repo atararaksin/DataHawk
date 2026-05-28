@@ -10,9 +10,9 @@ from typing import Union
 
 from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
 from datahawk.source.channel_constants import (
-    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING,
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED,
     GPS_VELOCITY_1, GPS_VELOCITY_2, GPS_VELOCITY_3,
-    GPS_LAT_ACC, GPS_LON_ACC, GPS_DISTANCE, MASTER_CLK, BEACON,
+    MASTER_CLK, BEACON,
 )
 
 
@@ -193,10 +193,6 @@ _GPS_SPEED_ID = -3
 _GPS_VN_ID = -4
 _GPS_VE_ID = -5
 _GPS_VD_ID = -6
-_GPS_LATACC_ID = -7
-_GPS_LONACC_ID = -8
-_GPS_DIST_ID = -9
-_GPS_HEADING_ID = -10
 
 
 def _parse_gps_blocks(dec: bytes, channels: dict[int, _ParseChannel]) -> None:
@@ -207,7 +203,6 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, _ParseChannel]) -> None:
     vn_ch = _ParseChannel(name=GPS_VELOCITY_1)
     ve_ch = _ParseChannel(name=GPS_VELOCITY_2)
     vd_ch = _ParseChannel(name=GPS_VELOCITY_3)
-    heading_ch = _ParseChannel(name=GPS_HEADING)
 
     # Encoding (confirmed ECEF Earth-Centered Earth-Fixed):
     # offset 0: timestamp (ms, session-local)
@@ -253,20 +248,6 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, _ParseChannel]) -> None:
             ve_ch.append(ts_sec, ve * 3.6 / 100)
             vd_ch.append(ts_sec, vd * 3.6 / 100)
 
-    # Heading from position deltas (vN/vE are NOT true N/E components)
-    _HEADING_GAP = 5
-    _M_PER_DEG_LAT = 111320.0
-    _m_per_deg_lon = 111320.0 * math.cos(math.radians(lat_ch.values[0])) if lat_ch.values else 1.0
-    for i in range(_HEADING_GAP, len(lat_ch.timestamps)):
-        speed_at_i = speed_ch.values[i] if i < len(speed_ch.values) else 0
-        if speed_at_i < 2.5:
-            continue
-        dn = (lat_ch.values[i] - lat_ch.values[i - _HEADING_GAP]) * _M_PER_DEG_LAT
-        de = (lon_ch.values[i] - lon_ch.values[i - _HEADING_GAP]) * _m_per_deg_lon
-        if abs(dn) < 0.05 and abs(de) < 0.05:
-            continue
-        heading_ch.append(lat_ch.timestamps[i], math.degrees(math.atan2(de, dn)) % 360)
-
     if lat_ch.timestamps:
         channels[_GPS_LAT_ID] = lat_ch
         channels[_GPS_LON_ID] = lon_ch
@@ -275,66 +256,8 @@ def _parse_gps_blocks(dec: bytes, channels: dict[int, _ParseChannel]) -> None:
         channels[_GPS_VN_ID] = vn_ch
         channels[_GPS_VE_ID] = ve_ch
         channels[_GPS_VD_ID] = vd_ch
-        channels[_GPS_HEADING_ID] = heading_ch
-
-        # Compute lateral and longitudinal acceleration from speed + heading
-        _compute_gps_acceleration(speed_ch, heading_ch, channels)
-
-        # Compute cumulative distance from lat/lon
-        _compute_gps_distance(lat_ch, lon_ch, channels)
 
 
-def _compute_gps_acceleration(speed_ch: _ParseChannel, heading_ch: _ParseChannel,
-                              channels: dict[int, _ParseChannel]) -> None:
-    """Compute GPS lateral/longitudinal acceleration from speed and heading."""
-    lat_acc = _ParseChannel(name=GPS_LAT_ACC)
-    lon_acc = _ParseChannel(name=GPS_LON_ACC)
-
-    N = 5  # smoothing half-window
-    for i in range(N, len(speed_ch.timestamps) - N):
-        t_i = speed_ch.timestamps[i]
-        dt = speed_ch.timestamps[i + N] - speed_ch.timestamps[i - N]
-        if dt <= 0:
-            continue
-
-        # Longitudinal = dSpeed/dt
-        ds = (speed_ch.values[i + N] - speed_ch.values[i - N]) / 3.6
-        lon_g = (ds / dt) / 9.81
-
-        # Lateral = speed * dHeading/dt (heading from position channel)
-        h0 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i - N])
-        h1 = heading_ch.get_value_at_time_with_interpolation(speed_ch.timestamps[i + N])
-        dh = math.radians(h1) - math.radians(h0)
-        if dh > math.pi: dh -= 2 * math.pi
-        if dh < -math.pi: dh += 2 * math.pi
-
-        spd_ms = speed_ch.values[i] / 3.6
-        lat_g = (spd_ms * dh / dt) / 9.81
-
-        lat_acc.append(t_i, lat_g)
-        lon_acc.append(t_i, lon_g)
-
-    if lat_acc.timestamps:
-        channels[_GPS_LATACC_ID] = lat_acc
-        channels[_GPS_LONACC_ID] = lon_acc
-
-
-def _compute_gps_distance(lat_ch: _ParseChannel, lon_ch: _ParseChannel,
-                           channels: dict[int, _ParseChannel]) -> None:
-    """Compute cumulative GPS distance in meters from session start."""
-    dist_ch = _ParseChannel(name=GPS_DISTANCE)
-    lats = lat_ch.values
-    lons = lon_ch.values
-    times = lat_ch.timestamps
-    cos_lat = math.cos(math.radians(lats[0]))
-    cum_dist = 0.0
-    dist_ch.append(times[0], 0.0)
-    for i in range(1, len(lats)):
-        dlat = (lats[i] - lats[i - 1]) * 111000
-        dlon = (lons[i] - lons[i - 1]) * 111000 * cos_lat
-        cum_dist += math.sqrt(dlat ** 2 + dlon ** 2)
-        dist_ch.append(times[i], cum_dist)
-    channels[_GPS_DIST_ID] = dist_ch
 
 
 def parse_xrz(path: Union[Path, str]) -> SourceSession:

@@ -8,3 +8,4 @@ from datahawk.session_processing.lap_detection import (
 from datahawk.session_processing.sector_detection import (
     detect_reference_lap_sector_split_times, calculate_sector_split_times, populate_sectors,
 )
+from datahawk.session_processing.synthetic_channels import add_synthetic_channels
