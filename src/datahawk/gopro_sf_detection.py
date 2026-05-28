@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from datahawk.xrz_parser import XrzSession, XrzChannel
+from datahawk.source.mychron.xrz_parser import XrzSession, XrzChannel
 from datahawk.types import Line, Point
 from datahawk.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH

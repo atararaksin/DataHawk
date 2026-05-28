@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datahawk.xrz_parser import XrzSession, _GPS_LAT_ID, _GPS_LON_ID, _GPS_HEADING_ID
+from datahawk.source.mychron.xrz_parser import XrzSession, _GPS_LAT_ID, _GPS_LON_ID, _GPS_HEADING_ID
 from datahawk.types import Line, Point
 from datahawk.gps_utils import create_perpendecular_line, intersection, interpolate_by_gps, mad_average_of_lines
 from datahawk.constants import CROSSING_LINE_LENGTH

@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
         track = dialog.track_input.text().strip() or "Unknown"
 
         try:
-            from datahawk.gopro_parser import parse_gopro
+            from datahawk.source.gopro.gopro_parser import parse_gopro
             from datahawk.session_processing import process_session
 
             parsed, _timo = parse_gopro(path)

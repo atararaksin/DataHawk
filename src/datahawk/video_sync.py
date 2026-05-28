@@ -13,7 +13,7 @@ import struct
 from pathlib import Path
 from typing import NamedTuple
 
-from datahawk.xrz_parser import XrzSession
+from datahawk.source.mychron.xrz_parser import XrzSession
 
 _GPS_LATACC_ID = -7
 _GPS_LONACC_ID = -8

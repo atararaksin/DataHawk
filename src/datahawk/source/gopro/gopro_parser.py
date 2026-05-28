@@ -1,7 +1,7 @@
-"""Parse GoPro MP4 GPMF telemetry into an XrzSession-compatible structure.
+"""Parse GoPro MP4 GPMF telemetry into a SourceSession structure.
 
 Extracts GPS5 (lat, lon, alt, speed2D, speed3D) and computes heading from
-position deltas. Produces an XrzSession with channels:
+position deltas. Produces a SourceSession with channels:
   -1: GPS Latitude
   -2: GPS Longitude
   -3: GPS Speed
@@ -15,7 +15,7 @@ import math
 import struct
 from pathlib import Path
 
-from datahawk.xrz_parser import XrzSession, XrzSessionMetadata, XrzChannel
+from datahawk.source.types import SourceChannel as XrzChannel, SourceSession as XrzSession, SourceSessionMetadata as XrzSessionMetadata
 
 _GPS_LAT_ID = -1
 _GPS_LON_ID = -2
@@ -25,7 +25,7 @@ _MASTER_CLK_ID = 0
 
 
 def parse_gopro(video_path: str | Path) -> tuple[XrzSession, float]:
-    """Parse GPS telemetry from a GoPro MP4 file into an XrzSession.
+    """Parse GPS telemetry from a GoPro MP4 file into a SourceSession.
 
     Returns (session, timo_seconds) where timo is the telemetry-to-video offset.
     Video time = session_time - timo (telemetry starts before video).

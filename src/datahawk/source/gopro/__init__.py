@@ -1,0 +1,1 @@
+"""GoPro telemetry data source."""

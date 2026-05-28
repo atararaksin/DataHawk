@@ -5,9 +5,10 @@ from __future__ import annotations
 import math
 import struct
 import zlib
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
+
+from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
 
 
 # WGS84 ellipsoid constants
@@ -30,51 +31,10 @@ def _ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float]
     return lat, lon
 
 
-@dataclass
-class XrzChannel:
-    """A telemetry channel definition."""
-    id: int
-    short_name: str
-    long_name: str
-    is_float16: bool = True
-    timestamps: list[float] = field(default_factory=list, repr=False)
-    values: list[float] = field(default_factory=list, repr=False)
-
-    @property
-    def name(self) -> str:
-        return self.long_name or self.short_name
-
-    def append(self, ts: float, val: float) -> None:
-        self.timestamps.append(ts)
-        self.values.append(val)
-
-    def get_value_at_time_with_interpolation(self, ts: float) -> float:
-        """Interpolate channel value at given timestamp using binary search."""
-        import bisect
-        i = bisect.bisect_right(self.timestamps, ts)
-        if i == 0:
-            return self.values[0]
-        if i >= len(self.timestamps):
-            return self.values[-1]
-        t0, t1 = self.timestamps[i - 1], self.timestamps[i]
-        frac = (ts - t0) / (t1 - t0) if t1 != t0 else 0.0
-        return self.values[i - 1] + frac * (self.values[i] - self.values[i - 1])
-
-
-@dataclass
-class XrzSessionMetadata:
-    """Non-temporal session metadata."""
-    track: str = ""
-    date: str = ""
-    time: str = ""
-    session_type: str = ""
-
-
-@dataclass
-class XrzSession:
-    """Complete parsed XRZ session."""
-    metadata: XrzSessionMetadata
-    channels: dict[int, XrzChannel]
+# Backward-compatible aliases
+XrzChannel = SourceChannel
+XrzSessionMetadata = SourceSessionMetadata
+XrzSession = SourceSession
 
 
 # CHS block header pattern: <hCHS\x00 + len=112(4) + flags=1(1) + >(1)

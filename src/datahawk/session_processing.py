@@ -7,7 +7,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from typing import Optional
 
-from datahawk.xrz_parser import XrzSession, XrzChannel as XrzChannel
+from datahawk.source.mychron.xrz_parser import XrzSession, XrzChannel
 from datahawk.lap_detection import detect_start_finish_fine, detect_laps
 from datahawk.gopro_sf_detection import detect_sf_from_max_speed
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track

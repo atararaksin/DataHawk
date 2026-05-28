@@ -16,7 +16,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from datahawk.xrz_parser import parse_xrz
+from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.gps_utils import create_perpendecular_line
@@ -246,7 +246,7 @@ class SessionViewer(QMainWindow):
     def _compute_sync(self, video_path: str):
         try:
             from datahawk.video_sync import sync_by_acceleration, sync_by_timestamp
-            from datahawk.xrz_parser import parse_xrz as _parse
+            from datahawk.source.mychron.xrz_parser import parse_xrz as _parse
 
             # Skip sync computation for GoPro sessions (video IS the telemetry source)
             if self._initial_video_path:
