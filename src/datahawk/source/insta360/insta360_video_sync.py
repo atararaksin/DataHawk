@@ -58,9 +58,12 @@ def sync_by_acceleration(video_path: str | Path, session: SourceSession) -> Sync
     # Convert lag to absolute offset:
     # g_sig[lag] corresponds to m_sig[0]
     # (insta_t0 + lag_seconds) in video time = (mycron_t0) in session-relative time
-    # We want: master_clk = video_time + offset
-    # master_clk_base + mycron_t0 = (insta_t0 + lag_seconds) + offset
-    offset_s = master_clk_base + mycron_t0 - insta_t0 - lag_seconds
+    # Session viewer uses: video_s = session_time + offset
+    # where session_time is Master Clk. So:
+    # video_s = master_clk + offset
+    # At alignment point: video_s = insta_t0 + lag_seconds, master_clk = master_clk_base + mycron_t0
+    # insta_t0 + lag_seconds = (master_clk_base + mycron_t0) + offset
+    offset_s = insta_t0 + lag_seconds - master_clk_base - mycron_t0
 
     confidence = "high" if corr > 0.4 else "medium" if corr > 0.25 else "low"
 
