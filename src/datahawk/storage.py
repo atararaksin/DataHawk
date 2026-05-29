@@ -138,6 +138,7 @@ def load_track_sectors(track_name: str) -> list | None:
     if not row:
         return None
     data = json.loads(row["sector_split_lines"])
+    return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]
 
 
 def save_track_sf_line(track_name: str, sf_line) -> None:
@@ -161,6 +162,7 @@ def load_track_sf_line(track_name: str):
     if not row or not row["sf_line"]:
         return None
     c = json.loads(row["sf_line"])
+    return Line(Point(c[0], c[1]), Point(c[2], c[3]))
 
 
 def delete_track(track_name: str) -> None:
