@@ -218,8 +218,8 @@ class SessionViewer(QMainWindow):
             self._btn_play.setEnabled(True)
             self._video_slider.setEnabled(True)
             self._player.setPosition(1)
-            # video_offset from TIMO: video_time = session_time + offset
-            self._video_offset = video_offset if video_offset is not None else 0.0
+            # GoPro sessions: video IS the telemetry source, offset is always 0
+            self._video_offset = 0.0
             self._btn_sync.setEnabled(True)
             self._btn_sync.setChecked(True)
             self._btn_sync.setStyleSheet("background-color: green;")
