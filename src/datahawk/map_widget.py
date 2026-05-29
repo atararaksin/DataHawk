@@ -65,7 +65,10 @@ class MapWidget(pg.PlotWidget):
         self._ref_lap: Lap | None = None
         self._cur_marker = None
         self._executor = ThreadPoolExecutor(max_workers=4)
-        self._pending_tiles: list = []
+        self._pending_futures: list[tuple] = []  # [(future, tx, ty, z), ...]
+        self._tile_timer = QTimer()
+        self._tile_timer.setInterval(50)
+        self._tile_timer.timeout.connect(self._check_tile_futures)
 
     def set_laps(self, current_lap: Lap | None, ref_lap: Lap | None):
         """Full redraw: trajectories immediately, tiles async."""
@@ -168,7 +171,7 @@ class MapWidget(pg.PlotWidget):
         self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
 
     def _load_tiles_async(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float):
-        """Submit tile fetches to thread pool, place them as they arrive."""
+        """Submit tile fetches to thread pool, poll for results via timer."""
         z = self._zoom
         px_left, px_top = _lat_lon_to_pixel(max_lat, min_lon, z)
         px_right, px_bottom = _lat_lon_to_pixel(min_lat, max_lon, z)
@@ -178,35 +181,37 @@ class MapWidget(pg.PlotWidget):
         ty_min = int(px_top // TILE_SIZE)
         ty_max = int(px_bottom // TILE_SIZE)
 
+        self._pending_futures.clear()
         for ty in range(ty_min, ty_max + 1):
             for tx in range(tx_min, tx_max + 1):
                 key = (tx, ty, z)
                 if key in self._tile_cache:
-                    # Place cached tile immediately
                     self._place_tile(tx, ty, self._tile_cache[key])
                 else:
                     url = TILE_URL.format(z=z, x=tx, y=ty)
                     future = self._executor.submit(_fetch_tile_data, url)
-                    future.add_done_callback(
-                        lambda f, _tx=tx, _ty=ty, _z=z: self._on_tile_fetched(f, _tx, _ty, _z))
+                    self._pending_futures.append((future, tx, ty, z))
 
-    def _on_tile_fetched(self, future, tx: int, ty: int, z: int):
-        """Called from thread pool when tile data arrives. Schedule UI update."""
-        data = future.result()
-        if data is None:
-            return
-        # Must update UI from main thread
-        QTimer.singleShot(0, lambda: self._place_tile_from_data(tx, ty, z, data))
+        if self._pending_futures:
+            self._tile_timer.start()
 
-    def _place_tile_from_data(self, tx: int, ty: int, z: int, data: bytes):
-        """Create pixmap and place tile (runs on main thread)."""
-        if z != self._zoom:
-            return  # Stale tile from a previous zoom level
-        img = QImage()
-        img.loadFromData(data)
-        pixmap = QPixmap.fromImage(img)
-        self._tile_cache[(tx, ty, z)] = pixmap
-        self._place_tile(tx, ty, pixmap)
+    def _check_tile_futures(self):
+        """Poll pending tile futures from main thread (called by timer)."""
+        still_pending = []
+        for future, tx, ty, z in self._pending_futures:
+            if future.done():
+                data = future.result()
+                if data and z == self._zoom:
+                    img = QImage()
+                    img.loadFromData(data)
+                    pixmap = QPixmap.fromImage(img)
+                    self._tile_cache[(tx, ty, z)] = pixmap
+                    self._place_tile(tx, ty, pixmap)
+            else:
+                still_pending.append((future, tx, ty, z))
+        self._pending_futures = still_pending
+        if not self._pending_futures:
+            self._tile_timer.stop()
 
     def _place_tile(self, tx: int, ty: int, pixmap: QPixmap):
         """Place a tile pixmap at the correct position."""
