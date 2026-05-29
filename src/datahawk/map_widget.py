@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import math
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import pyqtgraph as pg
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
@@ -27,13 +29,23 @@ def _lat_lon_to_pixel(lat: float, lon: float, zoom: int) -> tuple[float, float]:
 
 
 def _filter_nan(lats: list[float], lons: list[float]) -> tuple[list[float], list[float]]:
-    """Filter out NaN coordinates."""
+    """Filter out NaN coordinates, paired."""
     valid_lats, valid_lons = [], []
     for lat, lon in zip(lats, lons):
         if not (math.isnan(lat) or math.isnan(lon)):
             valid_lats.append(lat)
             valid_lons.append(lon)
     return valid_lats, valid_lons
+
+
+def _fetch_tile_data(url: str) -> bytes | None:
+    """Fetch tile bytes (runs in thread pool)."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "DataHawk/0.1"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.read()
+    except Exception:
+        return None
 
 
 class MapWidget(pg.PlotWidget):
@@ -53,15 +65,17 @@ class MapWidget(pg.PlotWidget):
         self._ref_lap: Lap | None = None
         self._cur_marker = None
         self._ref_marker = None
+        self._executor = ThreadPoolExecutor(max_workers=4)
+        self._pending_tiles: list = []
 
     def set_laps(self, current_lap: Lap | None, ref_lap: Lap | None):
-        """Full redraw: tiles + trajectories. Call when lap or reference changes."""
+        """Full redraw: trajectories immediately, tiles async."""
         self._current_lap = current_lap
         self._ref_lap = ref_lap
         self._full_redraw()
 
     def update_position(self, sample_idx: int):
-        """Update only the position markers (fast, no tile reload)."""
+        """Update only the position markers (fast)."""
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
@@ -74,8 +88,15 @@ class MapWidget(pg.PlotWidget):
 
         lat_ch = self._current_lap.channels.get(GPS_LATITUDE)
         lon_ch = self._current_lap.channels.get(GPS_LONGITUDE)
-        if lat_ch and lon_ch and 0 <= sample_idx < len(lat_ch.samples):
-            clat, clon = lat_ch.samples[sample_idx], lon_ch.samples[sample_idx]
+        if not lat_ch or not lon_ch:
+            return
+
+        # Use raw_values for position (works for incomplete laps too)
+        lats = lat_ch.raw_values if lat_ch.raw_values else lat_ch.samples
+        lons = lon_ch.raw_values if lon_ch.raw_values else lon_ch.samples
+
+        if 0 <= sample_idx < len(lats):
+            clat, clon = lats[sample_idx], lons[sample_idx]
             if not (math.isnan(clat) or math.isnan(clon)):
                 x, y = self._to_plot(clat, clon)
                 self._cur_marker = self.plot(
@@ -85,21 +106,34 @@ class MapWidget(pg.PlotWidget):
         if self._ref_lap:
             ref_lat_ch = self._ref_lap.channels.get(GPS_LATITUDE)
             ref_lon_ch = self._ref_lap.channels.get(GPS_LONGITUDE)
-            if ref_lat_ch and ref_lon_ch and 0 <= sample_idx < len(ref_lat_ch.samples):
-                rlat, rlon = ref_lat_ch.samples[sample_idx], ref_lon_ch.samples[sample_idx]
-                if not (math.isnan(rlat) or math.isnan(rlon)):
-                    x, y = self._to_plot(rlat, rlon)
-                    self._ref_marker = self.plot(
-                        [x], [y], pen=None, symbol="o", symbolSize=12,
-                        symbolBrush="r", symbolPen="w")
+            if ref_lat_ch and ref_lon_ch:
+                ref_lats = ref_lat_ch.raw_values if ref_lat_ch.raw_values else ref_lat_ch.samples
+                ref_lons = ref_lon_ch.raw_values if ref_lon_ch.raw_values else ref_lon_ch.samples
+                if 0 <= sample_idx < len(ref_lats):
+                    rlat, rlon = ref_lats[sample_idx], ref_lons[sample_idx]
+                    if not (math.isnan(rlat) or math.isnan(rlon)):
+                        x, y = self._to_plot(rlat, rlon)
+                        self._ref_marker = self.plot(
+                            [x], [y], pen=None, symbol="o", symbolSize=12,
+                            symbolBrush="r", symbolPen="w")
 
     def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
-        """Convert lat/lon to plot coordinates (absolute pixel X, inverted pixel Y)."""
+        """Convert lat/lon to plot coordinates."""
         px, py = _lat_lon_to_pixel(lat, lon, self._zoom)
         return px, -py
 
+    def _get_raw_coords(self, lap: Lap) -> tuple[list[float], list[float]]:
+        """Get raw GPS coordinates from a lap (works for incomplete laps)."""
+        lat_ch = lap.channels.get(GPS_LATITUDE)
+        lon_ch = lap.channels.get(GPS_LONGITUDE)
+        if not lat_ch or not lon_ch:
+            return [], []
+        lats = lat_ch.raw_values if lat_ch.raw_values else lat_ch.samples
+        lons = lon_ch.raw_values if lon_ch.raw_values else lon_ch.samples
+        return _filter_nan(lats, lons)
+
     def _full_redraw(self):
-        """Redraw tiles and trajectories."""
+        """Redraw trajectories immediately, load tiles in background."""
         self.clear()
         self._cur_marker = None
         self._ref_marker = None
@@ -107,12 +141,7 @@ class MapWidget(pg.PlotWidget):
         if self._current_lap is None:
             return
 
-        lat_ch = self._current_lap.channels.get(GPS_LATITUDE)
-        lon_ch = self._current_lap.channels.get(GPS_LONGITUDE)
-        if not lat_ch or not lon_ch:
-            return
-
-        cur_lats, cur_lons = _filter_nan(lat_ch.samples, lon_ch.samples)
+        cur_lats, cur_lons = self._get_raw_coords(self._current_lap)
         if not cur_lats:
             return
 
@@ -120,12 +149,9 @@ class MapWidget(pg.PlotWidget):
         all_lats, all_lons = list(cur_lats), list(cur_lons)
         ref_lats, ref_lons = [], []
         if self._ref_lap:
-            ref_lat_ch = self._ref_lap.channels.get(GPS_LATITUDE)
-            ref_lon_ch = self._ref_lap.channels.get(GPS_LONGITUDE)
-            if ref_lat_ch and ref_lon_ch:
-                ref_lats, ref_lons = _filter_nan(ref_lat_ch.samples, ref_lon_ch.samples)
-                all_lats.extend(ref_lats)
-                all_lons.extend(ref_lons)
+            ref_lats, ref_lons = self._get_raw_coords(self._ref_lap)
+            all_lats.extend(ref_lats)
+            all_lons.extend(ref_lons)
 
         # Bounding box with 15% margin
         min_lat, max_lat = min(all_lats), max(all_lats)
@@ -139,24 +165,22 @@ class MapWidget(pg.PlotWidget):
 
         self._zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
 
-        # Load tiles
-        self._load_tiles(min_lat, max_lat, min_lon, max_lon)
-
-        # Plot current lap trajectory (yellow)
+        # Plot trajectories immediately (no network needed)
         cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
         self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
 
-        # Plot reference lap trajectory (red)
         if ref_lats:
             ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
             self.plot([p[0] for p in ref_pts], [p[1] for p in ref_pts], pen=pg.mkPen("r", width=2))
 
         self.getViewBox().autoRange(padding=0)
 
-    def _load_tiles(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float):
-        """Fetch and display satellite tiles covering the bounding box."""
+        # Load tiles asynchronously
+        self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
+
+    def _load_tiles_async(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float):
+        """Submit tile fetches to thread pool, place them as they arrive."""
         z = self._zoom
-        # Get pixel bounds
         px_left, px_top = _lat_lon_to_pixel(max_lat, min_lon, z)
         px_right, px_bottom = _lat_lon_to_pixel(min_lat, max_lon, z)
 
@@ -167,19 +191,41 @@ class MapWidget(pg.PlotWidget):
 
         for ty in range(ty_min, ty_max + 1):
             for tx in range(tx_min, tx_max + 1):
-                pixmap = self._fetch_tile(tx, ty, z)
-                if pixmap is None:
-                    continue
-                # ViewBox Y is inverted (north up), so pixmap appears flipped.
-                # Flip vertically to compensate.
-                flipped = pixmap.transformed(QTransform().scale(1, -1))
-                item = QGraphicsPixmapItem(flipped)
-                # Tile covers plot-y from -(ty*256) to -((ty+1)*256).
-                # Pixmap renders downward in scene = upward in plot from pos.
-                # So pos = bottom of tile in plot coords.
-                item.setPos(tx * TILE_SIZE, -((ty + 1) * TILE_SIZE))
-                item.setZValue(-1)
-                self.addItem(item)
+                key = (tx, ty, z)
+                if key in self._tile_cache:
+                    # Place cached tile immediately
+                    self._place_tile(tx, ty, self._tile_cache[key])
+                else:
+                    url = TILE_URL.format(z=z, x=tx, y=ty)
+                    future = self._executor.submit(_fetch_tile_data, url)
+                    future.add_done_callback(
+                        lambda f, _tx=tx, _ty=ty, _z=z: self._on_tile_fetched(f, _tx, _ty, _z))
+
+    def _on_tile_fetched(self, future, tx: int, ty: int, z: int):
+        """Called from thread pool when tile data arrives. Schedule UI update."""
+        data = future.result()
+        if data is None:
+            return
+        # Must update UI from main thread
+        QTimer.singleShot(0, lambda: self._place_tile_from_data(tx, ty, z, data))
+
+    def _place_tile_from_data(self, tx: int, ty: int, z: int, data: bytes):
+        """Create pixmap and place tile (runs on main thread)."""
+        if z != self._zoom:
+            return  # Stale tile from a previous zoom level
+        img = QImage()
+        img.loadFromData(data)
+        pixmap = QPixmap.fromImage(img)
+        self._tile_cache[(tx, ty, z)] = pixmap
+        self._place_tile(tx, ty, pixmap)
+
+    def _place_tile(self, tx: int, ty: int, pixmap: QPixmap):
+        """Place a tile pixmap at the correct position."""
+        flipped = pixmap.transformed(QTransform().scale(1, -1))
+        item = QGraphicsPixmapItem(flipped)
+        item.setPos(tx * TILE_SIZE, -((ty + 1) * TILE_SIZE))
+        item.setZValue(-1)
+        self.addItem(item)
 
     def _fit_zoom(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> int:
         """Find zoom where bounding box fits in ~4x4 tiles."""
@@ -189,21 +235,3 @@ class MapWidget(pg.PlotWidget):
             if (px1 - px0) <= 4 * TILE_SIZE and (py1 - py0) <= 4 * TILE_SIZE:
                 return z
         return 13
-
-    def _fetch_tile(self, tx: int, ty: int, z: int) -> QPixmap | None:
-        """Fetch a tile with in-memory cache."""
-        key = (tx, ty, z)
-        if key in self._tile_cache:
-            return self._tile_cache[key]
-        url = TILE_URL.format(z=z, x=tx, y=ty)
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "DataHawk/0.1"})
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = resp.read()
-            img = QImage()
-            img.loadFromData(data)
-            pixmap = QPixmap.fromImage(img)
-            self._tile_cache[key] = pixmap
-            return pixmap
-        except Exception:
-            return None
