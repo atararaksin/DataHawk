@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
     QPushButton, QFileDialog, QSlider, QMessageBox, QCheckBox,
 )
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
+from PySide6.QtGui import QBrush, QColor, QKeyEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -46,6 +46,8 @@ class SessionViewer(QMainWindow):
         meta_time = self._session.start_time
         self.setWindowTitle(f"DataHawk — {self._session.track} {self._session.date} {meta_time}")
         self.setMinimumSize(1200, 700)
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().installEventFilter(self)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -63,6 +65,7 @@ class SessionViewer(QMainWindow):
         font.setPointSize(font.pointSize() - 1)
         self._table.setFont(font)
         self._table.setCursor(Qt.PointingHandCursor)
+        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._rebuild_lap_table()
         top_splitter.addWidget(self._table)
 
@@ -524,22 +527,27 @@ class SessionViewer(QMainWindow):
         session_time = video_s - self._video_offset
         self.jump_to_time(session_time)
 
-    def keyPressEvent(self, event):
-        key = event.key()
-        if key == Qt.Key_Down:
-            next_idx = min(self._active_lap_idx + 1, len(self._session.laps) - 1)
-            self.jump_to_lap(next_idx)
-        elif key == Qt.Key_Up:
-            prev_idx = max(self._active_lap_idx - 1, 0)
-            self.jump_to_lap(prev_idx)
-        elif key == Qt.Key_Space:
-            self._toggle_play()
-        elif key == Qt.Key_Left:
-            self.jump_to_time(self._current_session_time - 5.0)
-        elif key == Qt.Key_Right:
-            self.jump_to_time(self._current_session_time + 5.0)
-        else:
-            super().keyPressEvent(event)
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.KeyPress:
+            key = event.key()
+            if key == Qt.Key_Down:
+                next_idx = min(self._active_lap_idx + 1, len(self._session.laps) - 1)
+                self.jump_to_lap(next_idx)
+                return True
+            elif key == Qt.Key_Up:
+                prev_idx = max(self._active_lap_idx - 1, 0)
+                self.jump_to_lap(prev_idx)
+                return True
+            elif key == Qt.Key_Space:
+                self._toggle_play()
+                return True
+            elif key == Qt.Key_Left:
+                self.jump_to_time(self._current_session_time - 5.0)
+                return True
+            elif key == Qt.Key_Right:
+                self.jump_to_time(self._current_session_time + 5.0)
+                return True
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         self._sync_timer.stop()
