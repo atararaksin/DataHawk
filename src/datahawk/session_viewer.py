@@ -407,6 +407,7 @@ class SessionViewer(QMainWindow):
         current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
         ref_sel = self._ref_combo.currentIndex() - 1
         ref_lap = self._session.laps[ref_sel] if 0 <= ref_sel < len(self._session.laps) else None
+        self._map._track = self._session.track
         self._map.set_laps(current_lap, ref_lap)
 
     def get_sample_index_for_session_time(self, session_time: float) -> int:
@@ -523,6 +524,7 @@ class SessionViewer(QMainWindow):
         save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
         self._rebuild_lap_table()
         self._update_plot()
+        self._update_map_full()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _remove_sector_split(self):
@@ -544,6 +546,7 @@ class SessionViewer(QMainWindow):
         save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
         self._rebuild_lap_table()
         self._update_plot()
+        self._update_map_full()
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""

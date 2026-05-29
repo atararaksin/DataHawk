@@ -11,7 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
-from datahawk.types import Lap
+from datahawk.types import Lap, Track
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE
 
 # Esri World Imagery (free, no API key required)
@@ -63,6 +63,7 @@ class MapWidget(pg.PlotWidget):
         self._zoom = 17
         self._current_lap: Lap | None = None
         self._ref_lap: Lap | None = None
+        self._track: Track | None = None
         self._cur_marker = None
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._pending_futures: list[tuple] = []  # [(future, tx, ty, z), ...]
@@ -74,6 +75,11 @@ class MapWidget(pg.PlotWidget):
         """Full redraw: trajectories immediately, tiles async."""
         self._current_lap = current_lap
         self._ref_lap = ref_lap
+        self._full_redraw()
+
+    def set_track(self, track: Track | None):
+        """Update track reference and redraw (for SF line + sector splits)."""
+        self._track = track
         self._full_redraw()
 
     def update_position(self, sample_idx: int):
@@ -99,7 +105,7 @@ class MapWidget(pg.PlotWidget):
             if not (math.isnan(clat) or math.isnan(clon)):
                 x, y = self._to_plot(clat, clon)
                 self._cur_marker = self.plot(
-                    [x], [y], pen=None, symbol="o", symbolSize=12,
+                    [x], [y], pen=None, symbol="o", symbolSize=8,
                     symbolBrush="y", symbolPen="w")
 
     def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
@@ -164,6 +170,19 @@ class MapWidget(pg.PlotWidget):
         if ref_lats:
             ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
             self.plot([p[0] for p in ref_pts], [p[1] for p in ref_pts], pen=pg.mkPen("r", width=2))
+
+        # Draw SF line and sector split lines
+        if self._track:
+            # S/F line in green
+            sf = self._track.sf_line
+            ax, ay = self._to_plot(sf.a.lat, sf.a.lon)
+            bx, by = self._to_plot(sf.b.lat, sf.b.lon)
+            self.plot([ax, bx], [ay, by], pen=pg.mkPen("g", width=2))
+            # Sector splits in white
+            for line in self._track.sector_split_lines:
+                ax, ay = self._to_plot(line.a.lat, line.a.lon)
+                bx, by = self._to_plot(line.b.lat, line.b.lon)
+                self.plot([ax, bx], [ay, by], pen=pg.mkPen("w", width=1))
 
         self.getViewBox().autoRange(padding=0)
 
