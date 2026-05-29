@@ -84,15 +84,18 @@ def _interpolate_at(target_time: float, times: list[float], values: list[float])
     return values[lo] + frac * (values[hi] - values[lo])
 
 
-def process_session(parsed: SourceSession) -> Session:
+def process_session(parsed: SourceSession, sf_line_override=None) -> Session:
     """Process a parsed XRZ session into position-indexed laps."""
 
-    # Use ch4-based S/F detection if available, otherwise max-speed method
-    ch4 = parsed.channels.get(BEACON)
-    if ch4 and ch4.timestamps:
-        sf_line = detect_sf_from_mychron_beacon(parsed, ch4)
+    if sf_line_override is not None:
+        sf_line = sf_line_override
     else:
-        sf_line = detect_sf_from_max_speed(parsed)
+        # Use ch4-based S/F detection if available, otherwise max-speed method
+        ch4 = parsed.channels.get(BEACON)
+        if ch4 and ch4.timestamps:
+            sf_line = detect_sf_from_mychron_beacon(parsed, ch4)
+        else:
+            sf_line = detect_sf_from_max_speed(parsed)
 
     crossings = detect_laps(parsed, sf_line)
 

@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE TABLE IF NOT EXISTS tracks (
     name TEXT PRIMARY KEY,
-    sector_split_lines TEXT NOT NULL DEFAULT '[]'
+    sector_split_lines TEXT NOT NULL DEFAULT '[]',
+    sf_line TEXT
 );
 """
 
@@ -40,6 +41,11 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Add sf_line column if missing (existing DBs)
+    try:
+        conn.execute("ALTER TABLE tracks ADD COLUMN sf_line TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -132,4 +138,28 @@ def load_track_sectors(track_name: str) -> list | None:
     if not row:
         return None
     data = json.loads(row["sector_split_lines"])
+
+
+def save_track_sf_line(track_name: str, sf_line) -> None:
+    """Save a custom SF line for a track."""
+    data = [sf_line.a.lat, sf_line.a.lon, sf_line.b.lat, sf_line.b.lon]
+    db = _get_db()
+    db.execute(
+        "INSERT INTO tracks (name, sf_line) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET sf_line = ?",
+        (track_name, json.dumps(data), json.dumps(data)),
+    )
+    db.commit()
+    db.close()
+
+
+def load_track_sf_line(track_name: str):
+    """Load saved SF line for a track. Returns Line or None."""
+    from datahawk.types import Line, Point
+    db = _get_db()
+    row = db.execute("SELECT sf_line FROM tracks WHERE name = ?", (track_name,)).fetchone()
+    db.close()
+    if not row or not row["sf_line"]:
+        return None
+    c = json.loads(row["sf_line"])
+    return Line(Point(c[0], c[1]), Point(c[2], c[3]))
     return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]

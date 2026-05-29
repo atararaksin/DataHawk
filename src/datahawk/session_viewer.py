@@ -18,13 +18,14 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.source.mychron.xrz_parser import parse_xrz
-from datahawk.source.channel_constants import GPS_SPEED
+from datahawk.source.channel_constants import GPS_SPEED, GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING
 from datahawk.session_processing import process_session
 from datahawk.types import Session, Point
 from datahawk.utils.gps_utils import create_perpendecular_line
+from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
-from datahawk.storage import save_track_sectors, load_track_sectors
+from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line
 from datahawk.map_widget import MapWidget
 
 
@@ -35,7 +36,9 @@ class SessionViewer(QMainWindow):
             self._session = parsed_session
         else:
             parsed = parse_xrz(xrz_path)
-            self._session = process_session(parsed)
+            # Check for saved SF line override
+            saved_sf = load_track_sf_line(parsed.metadata.track)
+            self._session = process_session(parsed, sf_line_override=saved_sf)
         # Load saved sectors for this track
         saved_sectors = load_track_sectors(self._session.track.name)
         if saved_sectors is not None:
@@ -138,6 +141,9 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
+        self._btn_replace_sf = QPushButton("Replace SF")
+        self._btn_replace_sf.clicked.connect(self._replace_sf_line)
+        top_row.addWidget(self._btn_replace_sf)
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
@@ -223,6 +229,15 @@ class SessionViewer(QMainWindow):
             self._cursor.setVisible(True)
             self._sync_timer.start()
 
+
+    def _rebuild_ref_combo(self):
+        """Rebuild the reference lap dropdown after session reprocessing."""
+        self._ref_combo.blockSignals(True)
+        self._ref_combo.clear()
+        self._ref_combo.addItem("None")
+        for i, lap in enumerate(self._session.laps):
+            self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
+        self._ref_combo.blockSignals(False)
 
     def _rebuild_lap_table(self):
         """Rebuild the laps table with current sector columns."""
@@ -560,6 +575,45 @@ class SessionViewer(QMainWindow):
         self._rebuild_lap_table()
         self._update_plot()
         self._update_map_full()
+
+    def _replace_sf_line(self):
+        """Replace the S/F line with a perpendicular line at the current position, and reinitialize the session."""
+        if self._initial_video_path:
+            return  # GoPro sessions can't be re-processed this way
+
+        ref_lap = self._session.laps[self._session.reference_lap_index]
+        lat = get_channel_value_in_another_lap_with_interpolation(
+            self._session, self._current_session_time, ref_lap, GPS_LATITUDE)
+        lon = get_channel_value_in_another_lap_with_interpolation(
+            self._session, self._current_session_time, ref_lap, GPS_LONGITUDE)
+        heading = get_channel_value_in_another_lap_with_interpolation(
+            self._session, self._current_session_time, ref_lap, GPS_HEADING)
+
+        if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
+            return
+
+        new_sf = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
+
+        # Save to DB
+        save_track_sf_line(self._session.track.name, new_sf)
+
+        # Re-parse and re-process with new SF line
+        parsed = parse_xrz(self._xrz_path)
+        self._session = process_session(parsed, sf_line_override=new_sf)
+
+        # Reload saved sectors
+        saved_sectors = load_track_sectors(self._session.track.name)
+        if saved_sectors is not None:
+            self._session.track.sector_split_lines = saved_sectors
+        populate_sectors(self._session)
+
+        # Rebuild UI
+        self._active_lap_idx = 0
+        self._rebuild_lap_table()
+        self._rebuild_ref_combo()
+        self._update_plot()
+        self._update_map_full()
+        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
 
     def _sync_cursor(self):
         """Update plot cursor and active lap from video position."""
