@@ -124,15 +124,15 @@ class SessionViewer(QMainWindow):
         for i, lap in enumerate(self._session.laps):
             self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
         top_row.addWidget(self._ref_combo)
+        self._diff_cb = QCheckBox("Diff")
+        self._diff_cb.stateChanged.connect(self._update_plot)
+        top_row.addWidget(self._diff_cb)
         self._btn_sector = QPushButton("+ Sector")
         self._btn_sector.clicked.connect(self._add_sector_split)
         top_row.addWidget(self._btn_sector)
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
-        self._diff_cb = QCheckBox("Diff")
-        self._diff_cb.stateChanged.connect(self._update_plot)
-        top_row.addWidget(self._diff_cb)
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
@@ -523,6 +523,23 @@ class SessionViewer(QMainWindow):
         video_s = video_ms / 1000.0
         session_time = video_s - self._video_offset
         self.jump_to_time(session_time)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key_Down:
+            next_idx = min(self._active_lap_idx + 1, len(self._session.laps) - 1)
+            self.jump_to_lap(next_idx)
+        elif key == Qt.Key_Up:
+            prev_idx = max(self._active_lap_idx - 1, 0)
+            self.jump_to_lap(prev_idx)
+        elif key == Qt.Key_Space:
+            self._toggle_play()
+        elif key == Qt.Key_Left:
+            self.jump_to_time(self._current_session_time - 5.0)
+        elif key == Qt.Key_Right:
+            self.jump_to_time(self._current_session_time + 5.0)
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         self._sync_timer.stop()

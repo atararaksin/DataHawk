@@ -1,1 +1,1 @@
-CROSSING_LINE_LENGTH = 8.0  # meters
+CROSSING_LINE_LENGTH = 10.0  # meters
