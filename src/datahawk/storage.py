@@ -1,5 +1,6 @@
 """Persistent storage: SQLite metadata + session files."""
 
+import json
 import sqlite3
 import uuid
 from datetime import datetime
@@ -25,6 +26,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     best_lap_time REAL,
     file_path TEXT NOT NULL,
     imported_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tracks (
+    name TEXT PRIMARY KEY,
+    sector_split_lines TEXT NOT NULL DEFAULT '[]'
 );
 """
 
@@ -103,3 +108,28 @@ def get_session_file_path(session_id: str) -> Path | None:
     if row:
         return SESSIONS_DIR / row["file_path"]
     return None
+
+
+def save_track_sectors(track_name: str, sector_split_lines: list) -> None:
+    """Save sector split line coordinates for a track."""
+    from datahawk.types import Line
+    data = [[l.a.lat, l.a.lon, l.b.lat, l.b.lon] for l in sector_split_lines]
+    db = _get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO tracks (name, sector_split_lines) VALUES (?, ?)",
+        (track_name, json.dumps(data)),
+    )
+    db.commit()
+    db.close()
+
+
+def load_track_sectors(track_name: str) -> list | None:
+    """Load saved sector split lines for a track. Returns list of Line or None."""
+    from datahawk.types import Line, Point
+    db = _get_db()
+    row = db.execute("SELECT sector_split_lines FROM tracks WHERE name = ?", (track_name,)).fetchone()
+    db.close()
+    if not row:
+        return None
+    data = json.loads(row["sector_split_lines"])
+    return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]

@@ -23,6 +23,7 @@ from datahawk.types import Session, Point
 from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
+from datahawk.storage import save_track_sectors, load_track_sectors
 
 
 class SessionViewer(QMainWindow):
@@ -33,6 +34,10 @@ class SessionViewer(QMainWindow):
         else:
             parsed = parse_xrz(xrz_path)
             self._session = process_session(parsed)
+        # Load saved sectors for this track
+        saved_sectors = load_track_sectors(self._session.track.name)
+        if saved_sectors is not None:
+            self._session.track.sector_split_lines = saved_sectors
         populate_sectors(self._session)
         self._xrz_path = xrz_path
         self._video_offset: float | None = None  # None = no sync
@@ -484,6 +489,7 @@ class SessionViewer(QMainWindow):
         split_line = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
         self._session.track.sector_split_lines.append(split_line)
         populate_sectors(self._session)
+        save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
         self._rebuild_lap_table()
         self._update_plot()
         print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
@@ -504,6 +510,7 @@ class SessionViewer(QMainWindow):
         for i in reversed(to_remove):
             del self._session.track.sector_split_lines[i]
         populate_sectors(self._session)
+        save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
         self._rebuild_lap_table()
         self._update_plot()
 
