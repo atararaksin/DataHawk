@@ -271,7 +271,11 @@ class SessionViewer(QMainWindow):
 
     def _compute_sync(self, video_path: str):
         try:
-            from datahawk.source.gopro.video_sync import sync_by_acceleration, sync_by_timestamp
+            from datahawk.source.gopro.gopro_video_sync import is_gopro_video
+            from datahawk.source.gopro.gopro_video_sync import sync_by_acceleration as gopro_sync_accel
+            from datahawk.source.gopro.gopro_video_sync import sync_by_timestamp as gopro_sync_ts
+            from datahawk.source.insta360.insta360_video_sync import is_insta360_video
+            from datahawk.source.insta360.insta360_video_sync import sync_by_acceleration as insta360_sync_accel
             from datahawk.source.mychron.xrz_parser import parse_xrz as _parse
 
             # Skip sync computation for GoPro sessions (video IS the telemetry source)
@@ -287,12 +291,21 @@ class SessionViewer(QMainWindow):
 
             parsed = _parse(self._xrz_path)
 
-
-            result = sync_by_acceleration(video_path, parsed)
-            if result.confidence == "low":
-                ts_result = sync_by_timestamp(video_path, parsed)
-                if abs(ts_result.offset_seconds) < 86400:  # clock seems valid
-                    result = ts_result
+            if is_insta360_video(video_path):
+                result = insta360_sync_accel(video_path, parsed)
+            elif is_gopro_video(video_path):
+                result = gopro_sync_accel(video_path, parsed)
+                if result.confidence == "low":
+                    ts_result = gopro_sync_ts(video_path, parsed)
+                    if abs(ts_result.offset_seconds) < 86400:  # clock seems valid
+                        result = ts_result
+            else:
+                # Try GoPro sync as fallback for unknown cameras
+                result = gopro_sync_accel(video_path, parsed)
+                if result.confidence == "low":
+                    ts_result = gopro_sync_ts(video_path, parsed)
+                    if abs(ts_result.offset_seconds) < 86400:
+                        result = ts_result
 
             self._video_offset = result.offset_seconds
             label = f"Sync: {result.offset_seconds:+.2f}s ({result.method}"
