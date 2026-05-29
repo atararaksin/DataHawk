@@ -43,7 +43,7 @@ class Insta360Telemetry:
     is_raw_gyro: bool
     acc_range: float  # ±g
     gyro_range: float  # dps
-    first_frame_timestamp_ms: float
+    first_frame_timestamp_us: float  # microseconds (same unit as raw IMU timestamps)
     camera_type: str
 
 
@@ -154,7 +154,7 @@ def parse(filepath: str) -> Insta360Telemetry:
             is_raw_gyro=is_raw_gyro,
             acc_range=acc_range,
             gyro_range=gyro_range,
-            first_frame_timestamp_ms=first_frame_timestamp,
+            first_frame_timestamp_us=first_frame_timestamp,
             camera_type=camera_type,
         )
 

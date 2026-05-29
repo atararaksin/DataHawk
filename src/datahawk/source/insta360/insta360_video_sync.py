@@ -63,13 +63,13 @@ def _extract_insta360_accel_magnitude(path: Path) -> list[tuple[float, float]]:
         raise ValueError("No accelerometer data found in Insta360 video")
 
     # Convert timestamps to be relative to video start
-    # first_frame_timestamp is in milliseconds
-    video_start_s = telem.first_frame_timestamp_ms / 1000.0
+    # Both raw IMU timestamps and first_frame_timestamp are in microseconds;
+    # our parser already converts raw to seconds, so convert fft to seconds too
+    video_start_s = telem.first_frame_timestamp_us / 1_000_000.0
 
     # Downsample from ~1000Hz to ~50Hz (take every 20th sample)
-    step = max(1, len(telem.accelerometer) // (50 * int(
-        telem.accelerometer[-1][0] - telem.accelerometer[0][0]
-    ))) if len(telem.accelerometer) > 100 else 1
+    duration = telem.accelerometer[-1][0] - telem.accelerometer[0][0]
+    step = max(1, int(len(telem.accelerometer) / (50 * duration))) if duration > 0 else 1
 
     result = []
     for i in range(0, len(telem.accelerometer), step):
