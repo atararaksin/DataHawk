@@ -6,7 +6,7 @@ import math
 import urllib.request
 
 import pyqtgraph as pg
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
 from datahawk.types import Lap
@@ -62,7 +62,6 @@ class MapWidget(pg.PlotWidget):
 
     def update_position(self, sample_idx: int):
         """Update only the position markers (fast, no tile reload)."""
-        # Remove old markers
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
@@ -78,9 +77,10 @@ class MapWidget(pg.PlotWidget):
         if lat_ch and lon_ch and 0 <= sample_idx < len(lat_ch.samples):
             clat, clon = lat_ch.samples[sample_idx], lon_ch.samples[sample_idx]
             if not (math.isnan(clat) or math.isnan(clon)):
+                x, y = self._to_plot(clat, clon)
                 self._cur_marker = self.plot(
-                    [self._to_x(clon)], [self._to_y(clat)],
-                    pen=None, symbol="o", symbolSize=12, symbolBrush="y", symbolPen="w")
+                    [x], [y], pen=None, symbol="o", symbolSize=12,
+                    symbolBrush="y", symbolPen="w")
 
         if self._ref_lap:
             ref_lat_ch = self._ref_lap.channels.get(GPS_LATITUDE)
@@ -88,9 +88,15 @@ class MapWidget(pg.PlotWidget):
             if ref_lat_ch and ref_lon_ch and 0 <= sample_idx < len(ref_lat_ch.samples):
                 rlat, rlon = ref_lat_ch.samples[sample_idx], ref_lon_ch.samples[sample_idx]
                 if not (math.isnan(rlat) or math.isnan(rlon)):
+                    x, y = self._to_plot(rlat, rlon)
                     self._ref_marker = self.plot(
-                        [self._to_x(rlon)], [self._to_y(rlat)],
-                        pen=None, symbol="o", symbolSize=12, symbolBrush="r", symbolPen="w")
+                        [x], [y], pen=None, symbol="o", symbolSize=12,
+                        symbolBrush="r", symbolPen="w")
+
+    def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
+        """Convert lat/lon to plot coordinates (absolute pixel X, inverted pixel Y)."""
+        px, py = _lat_lon_to_pixel(lat, lon, self._zoom)
+        return px, -py
 
     def _full_redraw(self):
         """Redraw tiles and trajectories."""
@@ -137,47 +143,42 @@ class MapWidget(pg.PlotWidget):
         self._load_tiles(min_lat, max_lat, min_lon, max_lon)
 
         # Plot current lap trajectory (yellow)
-        cur_px = [self._to_x(lon) for lon in cur_lons]
-        cur_py = [self._to_y(lat) for lat in cur_lats]
-        self.plot(cur_px, cur_py, pen=pg.mkPen("y", width=2))
+        cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
+        self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
 
         # Plot reference lap trajectory (red)
         if ref_lats:
-            ref_px = [self._to_x(lon) for lon in ref_lons]
-            ref_py = [self._to_y(lat) for lat in ref_lats]
-            self.plot(ref_px, ref_py, pen=pg.mkPen("r", width=2))
+            ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
+            self.plot([p[0] for p in ref_pts], [p[1] for p in ref_pts], pen=pg.mkPen("r", width=2))
 
         self.getViewBox().autoRange(padding=0)
 
     def _load_tiles(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float):
         """Fetch and display satellite tiles covering the bounding box."""
         z = self._zoom
-        px_min_x, px_min_y = _lat_lon_to_pixel(max_lat, min_lon, z)
-        px_max_x, px_max_y = _lat_lon_to_pixel(min_lat, max_lon, z)
+        # Get pixel bounds
+        px_left, px_top = _lat_lon_to_pixel(max_lat, min_lon, z)
+        px_right, px_bottom = _lat_lon_to_pixel(min_lat, max_lon, z)
 
-        tx_min = int(px_min_x // TILE_SIZE)
-        tx_max = int(px_max_x // TILE_SIZE)
-        ty_min = int(px_min_y // TILE_SIZE)
-        ty_max = int(px_max_y // TILE_SIZE)
+        tx_min = int(px_left // TILE_SIZE)
+        tx_max = int(px_right // TILE_SIZE)
+        ty_min = int(px_top // TILE_SIZE)
+        ty_max = int(px_bottom // TILE_SIZE)
 
         for ty in range(ty_min, ty_max + 1):
             for tx in range(tx_min, tx_max + 1):
                 pixmap = self._fetch_tile(tx, ty, z)
                 if pixmap is None:
                     continue
-                item = QGraphicsPixmapItem(pixmap)
-                # Place tile: X = tile_x * TILE_SIZE, Y inverted for north-up
-                item.setPos(tx * TILE_SIZE, -(ty + 1) * TILE_SIZE)
+                # Tile's top-left in absolute pixel coords: (tx*256, ty*256)
+                # In plot coords: x = tx*256, y = -(ty*256) (top of tile)
+                # But QGraphicsPixmapItem draws downward from its pos,
+                # and our Y axis is inverted. Flip the pixmap vertically.
+                flipped = pixmap.transformed(QTransform().scale(1, -1))
+                item = QGraphicsPixmapItem(flipped)
+                item.setPos(tx * TILE_SIZE, -(ty * TILE_SIZE))
                 item.setZValue(-1)
                 self.addItem(item)
-
-    def _to_x(self, lon: float) -> float:
-        px, _ = _lat_lon_to_pixel(0, lon, self._zoom)
-        return px
-
-    def _to_y(self, lat: float) -> float:
-        _, py = _lat_lon_to_pixel(lat, 0, self._zoom)
-        return -py  # Invert so north is up
 
     def _fit_zoom(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> int:
         """Find zoom where bounding box fits in ~4x4 tiles."""
