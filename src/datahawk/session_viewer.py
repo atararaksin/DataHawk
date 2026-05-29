@@ -17,10 +17,9 @@ from PySide6.QtGui import QBrush, QColor, QKeyEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
-from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.source.channel_constants import GPS_SPEED, GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING
 from datahawk.session_processing import process_session
-from datahawk.types import Session, Point
+from datahawk.types import Point
 from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 from datahawk.constants import CROSSING_LINE_LENGTH
@@ -30,22 +29,16 @@ from datahawk.map_widget import MapWidget
 
 
 class SessionViewer(QMainWindow):
-    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, source_session=None, video_path: Path | None = None, video_offset: float | None = None):
+    def __init__(self, source_session, parent=None, *, video_path: Path | None = None):
         super().__init__(parent)
-        if parsed_session is not None:
-            self._session = parsed_session
-            self._source_session = source_session
-        else:
-            self._source_session = parse_xrz(xrz_path)
-            # Check for saved SF line override
-            saved_sf = load_track_sf_line(self._source_session.metadata.track)
-            self._session = process_session(self._source_session, sf_line_override=saved_sf)
+        self._source_session = source_session
+        saved_sf = load_track_sf_line(source_session.metadata.track)
+        self._session = process_session(source_session, sf_line_override=saved_sf)
         # Load saved sectors for this track
         saved_sectors = load_track_sectors(self._session.track.name)
         if saved_sectors is not None:
             self._session.track.sector_split_lines = saved_sectors
         populate_sectors(self._session)
-        self._xrz_path = xrz_path
         self._video_offset: float | None = None  # None = no sync
         self._initial_video_path = video_path  # for GoPro sessions
 
@@ -295,7 +288,6 @@ class SessionViewer(QMainWindow):
             from datahawk.source.gopro.gopro_video_sync import sync_by_timestamp as gopro_sync_ts
             from datahawk.source.insta360.insta360_video_sync import is_insta360_video
             from datahawk.source.insta360.insta360_video_sync import sync_by_acceleration as insta360_sync_accel
-            from datahawk.source.mychron.xrz_parser import parse_xrz as _parse
 
             # Skip sync computation for GoPro sessions (video IS the telemetry source)
             if self._initial_video_path:
