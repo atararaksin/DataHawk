@@ -56,28 +56,29 @@ def _extract_insta360_accel_magnitude(path: Path) -> list[tuple[float, float]]:
     """Extract horizontal acceleration magnitude from Insta360 IMU data.
 
     Returns list of (time_seconds_relative_to_video_start, magnitude_g).
-    Downsamples from ~1000Hz to ~50Hz for efficiency.
+    Low-pass filters at ~25Hz (moving average) then downsamples to ~50Hz.
+    This matches the bandwidth of GPS-derived acceleration from MyChron.
     """
     telem = _parse_insta360(str(path))
     if not telem.accelerometer:
         raise ValueError("No accelerometer data found in Insta360 video")
 
     # Convert timestamps to be relative to video start
-    # Both raw IMU timestamps and first_frame_timestamp are in microseconds;
-    # our parser already converts raw to seconds, so convert fft to seconds too
     video_start_s = telem.first_frame_timestamp_us / 1_000_000.0
 
-    # Downsample from ~1000Hz to ~50Hz (take every 20th sample)
-    duration = telem.accelerometer[-1][0] - telem.accelerometer[0][0]
-    step = max(1, int(len(telem.accelerometer) / (50 * duration))) if duration > 0 else 1
+    # Low-pass filter: moving average over 40 samples at ~1000Hz ≈ 25Hz cutoff
+    # Then downsample to ~50Hz (every 20th sample)
+    n = len(telem.accelerometer)
+    window = 40
+    step = 20
 
     result = []
-    for i in range(0, len(telem.accelerometer), step):
-        t, ax, ay, az = telem.accelerometer[i]
-        t_rel = t - video_start_s
-        # Horizontal magnitude (assuming Y is gravity axis based on first samples)
-        mag = math.sqrt(ax ** 2 + az ** 2)
-        result.append((t_rel, mag))
+    for i in range(window // 2, n - window // 2, step):
+        t = telem.accelerometer[i][0] - video_start_s
+        ax_sum = sum(telem.accelerometer[j][1] for j in range(i - window // 2, i + window // 2))
+        az_sum = sum(telem.accelerometer[j][3] for j in range(i - window // 2, i + window // 2))
+        mag = math.sqrt((ax_sum / window) ** 2 + (az_sum / window) ** 2)
+        result.append((t, mag))
 
     return result
 
