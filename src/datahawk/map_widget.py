@@ -56,7 +56,7 @@ class MapWidget(pg.PlotWidget):
         self.setAspectLocked(True)
         self.hideAxis("left")
         self.hideAxis("bottom")
-        self.setMouseEnabled(x=False, y=False)
+        self.setMouseEnabled(x=True, y=True)
         self.setMenuEnabled(False)
         self.getViewBox().setBackgroundColor("k")
         self._tile_cache: dict[tuple[int, int, int], QPixmap] = {}
