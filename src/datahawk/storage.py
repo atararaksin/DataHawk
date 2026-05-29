@@ -122,8 +122,8 @@ def save_track_sectors(track_name: str, sector_split_lines: list) -> None:
     data = [[l.a.lat, l.a.lon, l.b.lat, l.b.lon] for l in sector_split_lines]
     db = _get_db()
     db.execute(
-        "INSERT OR REPLACE INTO tracks (name, sector_split_lines) VALUES (?, ?)",
-        (track_name, json.dumps(data)),
+        "INSERT INTO tracks (name, sector_split_lines) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET sector_split_lines = ?",
+        (track_name, json.dumps(data), json.dumps(data)),
     )
     db.commit()
     db.close()
@@ -171,5 +171,3 @@ def delete_track(track_name: str) -> None:
     db.execute("DELETE FROM tracks WHERE name = ?", (track_name,))
     db.commit()
     db.close()
-    return Line(Point(c[0], c[1]), Point(c[2], c[3]))
-    return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]
