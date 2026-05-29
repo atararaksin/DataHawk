@@ -123,14 +123,19 @@ class MapWidget(pg.PlotWidget):
         return px, -py
 
     def _get_raw_coords(self, lap: Lap) -> tuple[list[float], list[float]]:
-        """Get raw GPS coordinates from a lap (works for incomplete laps)."""
+        """Get GPS coordinates from a lap. Prefers raw_values, falls back to samples."""
         lat_ch = lap.channels.get(GPS_LATITUDE)
         lon_ch = lap.channels.get(GPS_LONGITUDE)
         if not lat_ch or not lon_ch:
             return [], []
+        # Try raw_values first (works for incomplete laps)
         lats = lat_ch.raw_values if lat_ch.raw_values else lat_ch.samples
         lons = lon_ch.raw_values if lon_ch.raw_values else lon_ch.samples
-        return _filter_nan(lats, lons)
+        valid_lats, valid_lons = _filter_nan(lats, lons)
+        # Need at least 2 points to draw a line
+        if len(valid_lats) < 2:
+            return [], []
+        return valid_lats, valid_lons
 
     def _full_redraw(self):
         """Redraw trajectories immediately, load tiles in background."""
@@ -142,8 +147,6 @@ class MapWidget(pg.PlotWidget):
             return
 
         cur_lats, cur_lons = self._get_raw_coords(self._current_lap)
-        if not cur_lats:
-            return
 
         # Collect all points for bounding box
         all_lats, all_lons = list(cur_lats), list(cur_lons)
@@ -152,6 +155,10 @@ class MapWidget(pg.PlotWidget):
             ref_lats, ref_lons = self._get_raw_coords(self._ref_lap)
             all_lats.extend(ref_lats)
             all_lons.extend(ref_lons)
+
+        # Nothing to show at all
+        if len(all_lats) < 2:
+            return
 
         # Bounding box with 15% margin
         min_lat, max_lat = min(all_lats), max(all_lats)
@@ -166,8 +173,9 @@ class MapWidget(pg.PlotWidget):
         self._zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
 
         # Plot trajectories immediately (no network needed)
-        cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
-        self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
+        if cur_lats:
+            cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
+            self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
 
         if ref_lats:
             ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
