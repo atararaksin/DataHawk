@@ -31,7 +31,7 @@ def sync_by_acceleration(video_path: str | Path, session: SourceSession) -> Sync
     """Find time offset between an Insta360 MP4 and a MyChron session.
 
     Uses horizontal acceleration magnitude cross-correlation.
-    Returns offset such that: video_time = mycron_time + offset
+    Returns offset such that: master_clk_time = video_time + offset
     """
     insta_mag = _extract_insta360_accel_magnitude(Path(video_path))
     mycron_mag = _compute_mycron_accel_magnitude(session)
@@ -39,13 +39,28 @@ def sync_by_acceleration(video_path: str | Path, session: SourceSession) -> Sync
     if not insta_mag or not mycron_mag:
         raise ValueError("Could not extract acceleration data from one or both sources")
 
+    # Get the Master Clk base (session start in Master Clk time)
+    lat_ch = session.channels.get(GPS_LAT_ACC)
+    master_clk_base = lat_ch.timestamps[0] if lat_ch and lat_ch.timestamps else 0
+
+    # Remember start times before resampling strips them
+    insta_t0 = insta_mag[0][0]
+    mycron_t0 = mycron_mag[0][0]  # ~0 after subtracting base
+
     # Resample both to uniform 25Hz
     g_sig = _resample_25hz(insta_mag)
     m_sig = _resample_25hz(mycron_mag)
 
-    # Cross-correlate
-    offset_samples, corr = _cross_correlate(g_sig, m_sig)
-    offset_s = offset_samples / 25.0
+    # Cross-correlate: finds lag such that g_sig[lag:] aligns with m_sig[0:]
+    lag_samples, corr = _cross_correlate(g_sig, m_sig)
+    lag_seconds = lag_samples / 25.0
+
+    # Convert lag to absolute offset:
+    # g_sig[lag] corresponds to m_sig[0]
+    # (insta_t0 + lag_seconds) in video time = (mycron_t0) in session-relative time
+    # We want: master_clk = video_time + offset
+    # master_clk_base + mycron_t0 = (insta_t0 + lag_seconds) + offset
+    offset_s = master_clk_base + mycron_t0 - insta_t0 - lag_seconds
 
     confidence = "high" if corr > 0.4 else "medium" if corr > 0.25 else "low"
 
@@ -84,7 +99,10 @@ def _extract_insta360_accel_magnitude(path: Path) -> list[tuple[float, float]]:
 
 
 def _compute_mycron_accel_magnitude(session: SourceSession) -> list[tuple[float, float]]:
-    """Compute horizontal acceleration magnitude from MyChron GPS data."""
+    """Compute horizontal acceleration magnitude from MyChron GPS data.
+    
+    Returns timestamps relative to session start (not raw Master Clk).
+    """
     lat_ch = session.channels.get(GPS_LAT_ACC)
     lon_ch = session.channels.get(GPS_LON_ACC)
 
@@ -92,7 +110,9 @@ def _compute_mycron_accel_magnitude(session: SourceSession) -> list[tuple[float,
         raise ValueError("Session missing GPS Lat Acc / Lon Acc channels")
 
     n = min(len(lat_ch.values), len(lon_ch.values))
-    return [(lat_ch.timestamps[i], math.sqrt(lat_ch.values[i] ** 2 + lon_ch.values[i] ** 2))
+    # Subtract session start time so timestamps begin near 0
+    t_offset = lat_ch.timestamps[0] if lat_ch.timestamps else 0
+    return [(lat_ch.timestamps[i] - t_offset, math.sqrt(lat_ch.values[i] ** 2 + lon_ch.values[i] ** 2))
             for i in range(n)]
 
 
