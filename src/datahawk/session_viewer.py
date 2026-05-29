@@ -25,7 +25,7 @@ from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
-from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line
+from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
 from datahawk.map_widget import MapWidget
 
 
@@ -141,6 +141,9 @@ class SessionViewer(QMainWindow):
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
         top_row.addWidget(self._btn_rm_sector)
+        self._btn_clear_track = QPushButton("Clear")
+        self._btn_clear_track.clicked.connect(self._clear_track)
+        top_row.addWidget(self._btn_clear_track)
         self._btn_replace_sf = QPushButton("Replace SF")
         self._btn_replace_sf.clicked.connect(self._replace_sf_line)
         top_row.addWidget(self._btn_replace_sf)
@@ -575,6 +578,19 @@ class SessionViewer(QMainWindow):
         self._rebuild_lap_table()
         self._update_plot()
         self._update_map_full()
+
+    def _clear_track(self):
+        """Evict track from DB and reload session with auto-detected SF."""
+        delete_track(self._session.track.name)
+        parsed = parse_xrz(self._xrz_path)
+        self._session = process_session(parsed)
+        populate_sectors(self._session)
+        self._active_lap_idx = 0
+        self._rebuild_lap_table()
+        self._rebuild_ref_combo()
+        self._update_plot()
+        self._update_map_full()
+        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
 
     def _replace_sf_line(self):
         """Replace the S/F line with a perpendicular line at the current position, and reinitialize the session."""

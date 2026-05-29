@@ -161,5 +161,13 @@ def load_track_sf_line(track_name: str):
     if not row or not row["sf_line"]:
         return None
     c = json.loads(row["sf_line"])
+
+
+def delete_track(track_name: str) -> None:
+    """Delete all saved track data (SF line + sectors)."""
+    db = _get_db()
+    db.execute("DELETE FROM tracks WHERE name = ?", (track_name,))
+    db.commit()
+    db.close()
     return Line(Point(c[0], c[1]), Point(c[2], c[3]))
     return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]
