@@ -30,15 +30,16 @@ from datahawk.map_widget import MapWidget
 
 
 class SessionViewer(QMainWindow):
-    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, video_path: Path | None = None, video_offset: float | None = None):
+    def __init__(self, xrz_path: Path, parent=None, *, parsed_session: Session | None = None, source_session=None, video_path: Path | None = None, video_offset: float | None = None):
         super().__init__(parent)
         if parsed_session is not None:
             self._session = parsed_session
+            self._source_session = source_session
         else:
-            parsed = parse_xrz(xrz_path)
+            self._source_session = parse_xrz(xrz_path)
             # Check for saved SF line override
-            saved_sf = load_track_sf_line(parsed.metadata.track)
-            self._session = process_session(parsed, sf_line_override=saved_sf)
+            saved_sf = load_track_sf_line(self._source_session.metadata.track)
+            self._session = process_session(self._source_session, sf_line_override=saved_sf)
         # Load saved sectors for this track
         saved_sectors = load_track_sectors(self._session.track.name)
         if saved_sectors is not None:
@@ -307,7 +308,7 @@ class SessionViewer(QMainWindow):
                 self._sync_timer.start()
                 return
 
-            parsed = _parse(self._xrz_path)
+            parsed = self._source_session
 
             if is_insta360_video(video_path):
                 result = insta360_sync_accel(video_path, parsed)
@@ -582,8 +583,7 @@ class SessionViewer(QMainWindow):
     def _clear_track(self):
         """Evict track from DB and reload session with auto-detected SF."""
         delete_track(self._session.track.name)
-        parsed = parse_xrz(self._xrz_path)
-        self._session = process_session(parsed)
+        self._session = process_session(self._source_session)
         populate_sectors(self._session)
         self._active_lap_idx = 0
         self._rebuild_lap_table()
@@ -594,9 +594,6 @@ class SessionViewer(QMainWindow):
 
     def _replace_sf_line(self):
         """Replace the S/F line with a perpendicular line at the current position, and reinitialize the session."""
-        if self._initial_video_path:
-            return  # GoPro sessions can't be re-processed this way
-
         ref_lap = self._session.laps[self._session.reference_lap_index]
         lat = get_channel_value_in_another_lap_with_interpolation(
             self._session, self._current_session_time, ref_lap, GPS_LATITUDE)
@@ -613,9 +610,8 @@ class SessionViewer(QMainWindow):
         # Save to DB
         save_track_sf_line(self._session.track.name, new_sf)
 
-        # Re-parse and re-process with new SF line
-        parsed = parse_xrz(self._xrz_path)
-        self._session = process_session(parsed, sf_line_override=new_sf)
+        # Re-process with new SF line
+        self._session = process_session(self._source_session, sf_line_override=new_sf)
 
         # Reload saved sectors
         saved_sectors = load_track_sectors(self._session.track.name)

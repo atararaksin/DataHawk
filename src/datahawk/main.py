@@ -99,7 +99,7 @@ class MainWindow(QMainWindow):
 
             video_path = Path(path)
             viewer = SessionViewer(
-                video_path, parsed_session=session, video_path=video_path,
+                video_path, parsed_session=session, source_session=parsed, video_path=video_path,
             )
             viewer.setWindowTitle(f"DataHawk — {track} ({driver}) [GoPro]")
             viewer.show()
