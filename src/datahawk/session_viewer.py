@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
     QPushButton, QFileDialog, QSlider, QMessageBox, QCheckBox,
+    QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
 from PySide6.QtGui import QBrush, QColor, QKeyEvent
@@ -140,23 +141,22 @@ class SessionViewer(QMainWindow):
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
-        # Plot + Map in horizontal splitter
-        graph_splitter = QSplitter(Qt.Horizontal)
+        # Graph and Map in tabs
+        self._bottom_tabs = QTabWidget()
+        self._bottom_tabs.setTabPosition(QTabWidget.South)
 
         # Plot widget
         self._plot = pg.PlotWidget()
         self._plot.setLabel("bottom", "Time", units="s")
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.scene().sigMouseClicked.connect(self._on_plot_click)
-        graph_splitter.addWidget(self._plot)
+        self._bottom_tabs.addTab(self._plot, "Graph")
 
         # Satellite map widget
         self._map = MapWidget()
-        self._map.setMinimumWidth(200)
-        graph_splitter.addWidget(self._map)
-        graph_splitter.setSizes([600, 300])
+        self._bottom_tabs.addTab(self._map, "Map")
 
-        bottom_layout.addWidget(graph_splitter)
+        bottom_layout.addWidget(self._bottom_tabs)
 
         # Cursor line on plot
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
