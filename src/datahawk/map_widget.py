@@ -64,7 +64,6 @@ class MapWidget(pg.PlotWidget):
         self._current_lap: Lap | None = None
         self._ref_lap: Lap | None = None
         self._cur_marker = None
-        self._ref_marker = None
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._pending_tiles: list = []
 
@@ -75,13 +74,10 @@ class MapWidget(pg.PlotWidget):
         self._full_redraw()
 
     def update_position(self, sample_idx: int):
-        """Update only the position markers (fast)."""
+        """Update only the current position marker (fast)."""
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
-        if self._ref_marker:
-            self.removeItem(self._ref_marker)
-            self._ref_marker = None
 
         if self._current_lap is None:
             return
@@ -102,20 +98,6 @@ class MapWidget(pg.PlotWidget):
                 self._cur_marker = self.plot(
                     [x], [y], pen=None, symbol="o", symbolSize=12,
                     symbolBrush="y", symbolPen="w")
-
-        if self._ref_lap:
-            ref_lat_ch = self._ref_lap.channels.get(GPS_LATITUDE)
-            ref_lon_ch = self._ref_lap.channels.get(GPS_LONGITUDE)
-            if ref_lat_ch and ref_lon_ch:
-                ref_lats = ref_lat_ch.raw_values if ref_lat_ch.raw_values else ref_lat_ch.samples
-                ref_lons = ref_lon_ch.raw_values if ref_lon_ch.raw_values else ref_lon_ch.samples
-                if 0 <= sample_idx < len(ref_lats):
-                    rlat, rlon = ref_lats[sample_idx], ref_lons[sample_idx]
-                    if not (math.isnan(rlat) or math.isnan(rlon)):
-                        x, y = self._to_plot(rlat, rlon)
-                        self._ref_marker = self.plot(
-                            [x], [y], pen=None, symbol="o", symbolSize=12,
-                            symbolBrush="r", symbolPen="w")
 
     def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
         """Convert lat/lon to plot coordinates."""
@@ -141,7 +123,6 @@ class MapWidget(pg.PlotWidget):
         """Redraw trajectories immediately, load tiles in background."""
         self.clear()
         self._cur_marker = None
-        self._ref_marker = None
 
         if self._current_lap is None:
             return
