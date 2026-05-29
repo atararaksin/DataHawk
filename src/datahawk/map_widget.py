@@ -6,7 +6,7 @@ import math
 import urllib.request
 
 import pyqtgraph as pg
-from PySide6.QtGui import QImage, QPixmap, QTransform
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
 from datahawk.types import Lap
@@ -170,13 +170,13 @@ class MapWidget(pg.PlotWidget):
                 pixmap = self._fetch_tile(tx, ty, z)
                 if pixmap is None:
                     continue
-                # Tile's top-left in absolute pixel coords: (tx*256, ty*256)
-                # In plot coords: x = tx*256, y = -(ty*256) (top of tile)
-                # But QGraphicsPixmapItem draws downward from its pos,
-                # and our Y axis is inverted. Flip the pixmap vertically.
-                flipped = pixmap.transformed(QTransform().scale(1, -1))
-                item = QGraphicsPixmapItem(flipped)
-                item.setPos(tx * TILE_SIZE, -(ty * TILE_SIZE))
+                # In plot coords: y = -py (north up). Tile covers py from ty*256 to (ty+1)*256.
+                # In plot y that's -(ty*256) down to -((ty+1)*256).
+                # QGraphicsPixmapItem renders from pos downward in scene-y,
+                # but pyqtgraph's ViewBox inverts Y, so item renders upward in plot-y from pos.
+                # So pos should be the BOTTOM of the tile in plot coords: -((ty+1)*256)
+                item = QGraphicsPixmapItem(pixmap)
+                item.setPos(tx * TILE_SIZE, -((ty + 1) * TILE_SIZE))
                 item.setZValue(-1)
                 self.addItem(item)
 
