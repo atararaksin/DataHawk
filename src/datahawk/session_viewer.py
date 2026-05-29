@@ -24,6 +24,7 @@ from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors
+from datahawk.map_widget import MapWidget
 
 
 class SessionViewer(QMainWindow):
@@ -139,12 +140,23 @@ class SessionViewer(QMainWindow):
         top_row.addStretch()
         bottom_layout.addLayout(top_row)
 
+        # Plot + Map in horizontal splitter
+        graph_splitter = QSplitter(Qt.Horizontal)
+
         # Plot widget
         self._plot = pg.PlotWidget()
         self._plot.setLabel("bottom", "Time", units="s")
         self._plot.showGrid(x=True, y=True, alpha=0.3)
         self._plot.scene().sigMouseClicked.connect(self._on_plot_click)
-        bottom_layout.addWidget(self._plot)
+        graph_splitter.addWidget(self._plot)
+
+        # Satellite map widget
+        self._map = MapWidget()
+        self._map.setMinimumWidth(200)
+        graph_splitter.addWidget(self._map)
+        graph_splitter.setSizes([600, 300])
+
+        bottom_layout.addWidget(graph_splitter)
 
         # Cursor line on plot
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
@@ -176,6 +188,7 @@ class SessionViewer(QMainWindow):
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
+        self._ref_combo.currentIndexChanged.connect(self._update_map_full)
         self._table.cellClicked.connect(self._on_table_cell_clicked)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
@@ -194,6 +207,7 @@ class SessionViewer(QMainWindow):
         if self._session.laps:
             self.jump_to_time(self._session.laps[0].lap_start_time)
             self._update_plot()
+            self._update_map_full()
 
         # Auto-load video if provided (GoPro sessions)
         if self._initial_video_path and self._initial_video_path.exists():
@@ -355,6 +369,7 @@ class SessionViewer(QMainWindow):
         if lap_idx != self._active_lap_idx:
             self._active_lap_idx = lap_idx
             self._update_plot()
+            self._update_map_full()
 
         # Position cursor: X axis is time relative to lap start
         cursor_x = session_time - self._session.laps[lap_idx].lap_start_time
@@ -362,6 +377,7 @@ class SessionViewer(QMainWindow):
         self._cursor.setPos(cursor_x)
 
         self._select_active_table_cell()
+        self._update_map()
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
@@ -380,6 +396,18 @@ class SessionViewer(QMainWindow):
         self._table.blockSignals(True)
         self._table.setCurrentCell(self._active_lap_idx, col)
         self._table.blockSignals(False)
+
+    def _update_map(self):
+        """Update the satellite map position marker."""
+        sample_idx = self.get_sample_index_for_session_time(self._current_session_time)
+        self._map.update_position(sample_idx)
+
+    def _update_map_full(self):
+        """Full map redraw (tiles + trajectories). Call on lap/reference change."""
+        current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
+        ref_sel = self._ref_combo.currentIndex() - 1
+        ref_lap = self._session.laps[ref_sel] if 0 <= ref_sel < len(self._session.laps) else None
+        self._map.set_laps(current_lap, ref_lap)
 
     def get_sample_index_for_session_time(self, session_time: float) -> int:
         """Get the reindexed sample index for a given session time using the temporal index."""
