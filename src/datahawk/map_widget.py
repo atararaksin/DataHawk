@@ -182,7 +182,7 @@ class MapWidget(pg.PlotWidget):
             for line in self._track.sector_split_lines:
                 ax, ay = self._to_plot(line.a.lat, line.a.lon)
                 bx, by = self._to_plot(line.b.lat, line.b.lon)
-                self.plot([ax, bx], [ay, by], pen=pg.mkPen("w", width=1))
+                self.plot([ax, bx], [ay, by], pen=pg.mkPen("w", width=2))
 
         self.getViewBox().autoRange(padding=0)
 
