@@ -90,17 +90,12 @@ class MainWindow(QMainWindow):
 
         try:
             from datahawk.source.gopro.gopro_parser import parse_gopro
-            from datahawk.session_processing import process_session
 
             parsed, _timo = parse_gopro(path)
             parsed.metadata.track = track
             parsed.metadata.date = ""
-            session = process_session(parsed)
 
-            video_path = Path(path)
-            viewer = SessionViewer(
-                video_path, parsed_session=session, video_path=video_path,
-            )
+            viewer = SessionViewer(parsed, video_path=Path(path))
             viewer.setWindowTitle(f"DataHawk — {track} ({driver}) [GoPro]")
             viewer.show()
             self._viewers.append(viewer)
@@ -112,7 +107,9 @@ class MainWindow(QMainWindow):
         if not path or not path.exists():
             QMessageBox.warning(self, "Error", "Session file not found.")
             return
-        viewer = SessionViewer(path)
+        from datahawk.source.mychron.xrz_parser import parse_xrz
+        parsed = parse_xrz(path)
+        viewer = SessionViewer(parsed)
         viewer.show()
         self._viewers.append(viewer)
 

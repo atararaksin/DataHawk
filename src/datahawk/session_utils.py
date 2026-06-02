@@ -7,6 +7,28 @@ import math
 from datahawk.types import Session, Lap
 
 
+def get_sample_index_for_session_time(session: Session, session_time: float) -> int:
+    """Get the reindexed sample index for a given session time using the temporal index."""
+    start = session.laps[0].lap_start_time
+    idx = int((session_time - start) / session.time_resolution)
+    if idx < 0:
+        return 0
+    if idx >= len(session.temporal_index):
+        return session.temporal_index[-1].sample_index if session.temporal_index else 0
+    return session.temporal_index[idx].sample_index
+
+
+def get_lap_idx_by_session_time(session: Session, session_time: float) -> int:
+    """Find the active lap index for a given session time."""
+    lap_idx = 0
+    for i, lap in enumerate(session.laps):
+        if session_time >= lap.lap_start_time:
+            lap_idx = i
+        else:
+            break
+    return lap_idx
+
+
 def get_channel_value_in_another_lap_with_interpolation(
     source_session: Session, source_session_time: float, target_lap: Lap, channel_name: str
 ) -> float:
@@ -56,3 +78,39 @@ def get_channel_value_in_another_lap_with_interpolation(
         return float('nan')
 
     return val1 + frac * (val2 - val1)
+
+
+def create_sector_split_line_at_time(session: Session, session_time: float):
+    """Create a sector split line at the given session time. Returns the line or None if invalid."""
+    from datahawk.types import Point
+    from datahawk.utils.gps_utils import create_perpendecular_line
+    from datahawk.constants import CROSSING_LINE_LENGTH
+
+    sample_idx = get_sample_index_for_session_time(session, session_time)
+
+    # Check if within track limits using Master Clk continuity on current lap
+    current_lap = session.laps[get_lap_idx_by_session_time(session, session_time)]
+    mc_ch = current_lap.master_clk
+    if mc_ch and sample_idx + 1 < len(mc_ch.samples):
+        if math.isnan(mc_ch.samples[sample_idx]) or math.isnan(mc_ch.samples[sample_idx + 1]):
+            return None
+
+    # Get reference lap's lat/lon/heading at this spatial position
+    ref_lap = session.laps[session.reference_lap_index]
+    lat_ch = ref_lap.gps_lat
+    lon_ch = ref_lap.gps_lon
+    heading_ch = ref_lap.gps_heading
+
+    if not (lat_ch and lon_ch and heading_ch):
+        return None
+    if sample_idx >= len(lat_ch.samples):
+        return None
+
+    lat = lat_ch.samples[sample_idx]
+    lon = lon_ch.samples[sample_idx]
+    heading = heading_ch.samples[sample_idx]
+
+    if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
+        return None
+
+    return create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
