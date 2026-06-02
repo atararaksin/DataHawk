@@ -21,7 +21,7 @@ from datahawk.session_utils import get_channel_value_in_another_lap_with_interpo
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
-from datahawk.map_widget import MapWidget
+from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
@@ -115,6 +115,7 @@ class SessionViewer(QMainWindow):
 
         # Satellite map widget
         self._map = MapWidget()
+        self._map.set_session(self._session)
         self._bottom_tabs.addTab(self._map, "Map")
 
         bottom_layout.addWidget(self._bottom_tabs)
@@ -211,15 +212,14 @@ class SessionViewer(QMainWindow):
 
     def _update_map(self):
         """Update the satellite map position marker."""
-        sample_idx = self.get_sample_index_for_session_time(self._current_session_time)
-        self._map.update_position(sample_idx)
+        self._map.update_position(self._current_session_time)
 
     def _update_map_full(self):
         """Full map redraw (tiles + trajectories). Call on lap/reference change."""
         current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
         ref_sel = self._ref_combo.currentIndex() - 1
         ref_lap = self._session.laps[ref_sel] if 0 <= ref_sel < len(self._session.laps) else None
-        self._map._track = self._session.track
+        self._map.set_track(self._session.track)
         self._map.set_laps(current_lap, ref_lap)
 
     def get_sample_index_for_session_time(self, session_time: float) -> int:
@@ -353,6 +353,7 @@ class SessionViewer(QMainWindow):
         delete_track(self._session.track.name)
         self._session = process_session(self._source_session)
         populate_sectors(self._session)
+        self._map.set_session(self._session)
         self._active_lap_idx = 0
         self._rebuild_lap_table()
         self._rebuild_ref_combo()
@@ -380,6 +381,7 @@ class SessionViewer(QMainWindow):
 
         # Re-process with new SF line
         self._session = process_session(self._source_session, sf_line_override=new_sf)
+        self._map.set_session(self._session)
 
         # Reload saved sectors
         saved_sectors = load_track_sectors(self._session.track.name)

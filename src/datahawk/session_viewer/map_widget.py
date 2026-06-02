@@ -11,7 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsPixmapItem
 
-from datahawk.types import Lap, Track
+from datahawk.types import Lap, Track, Session
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE
 
 # Esri World Imagery (free, no API key required)
@@ -64,6 +64,7 @@ class MapWidget(pg.PlotWidget):
         self._current_lap: Lap | None = None
         self._ref_lap: Lap | None = None
         self._track: Track | None = None
+        self._session: Session | None = None
         self._cur_marker = None
         self._executor = ThreadPoolExecutor(max_workers=4)
         self._pending_futures: list[tuple] = []  # [(future, tx, ty, z), ...]
@@ -77,13 +78,18 @@ class MapWidget(pg.PlotWidget):
         self._ref_lap = ref_lap
         self._full_redraw()
 
+    def set_session(self, session: Session):
+        """Set session for temporal index lookups."""
+        self._session = session
+
     def set_track(self, track: Track | None):
         """Update track reference and redraw (for SF line + sector splits)."""
         self._track = track
         self._full_redraw()
 
-    def update_position(self, sample_idx: int):
-        """Update only the current position marker (fast)."""
+    def update_position(self, session_time: float):
+        """Update the current position marker for a given session time."""
+        sample_idx = self._session_time_to_sample_idx(session_time)
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
@@ -107,6 +113,17 @@ class MapWidget(pg.PlotWidget):
                 self._cur_marker = self.plot(
                     [x], [y], pen=None, symbol="o", symbolSize=8,
                     symbolBrush="y", symbolPen="w")
+
+    def _session_time_to_sample_idx(self, session_time: float) -> int:
+        if not self._session or not self._session.temporal_index:
+            return 0
+        start = self._session.laps[0].lap_start_time
+        idx = int((session_time - start) / self._session.time_resolution)
+        if idx < 0:
+            return 0
+        if idx >= len(self._session.temporal_index):
+            return self._session.temporal_index[-1].sample_index
+        return self._session.temporal_index[idx].sample_index
 
     def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
         """Convert lat/lon to plot coordinates."""
