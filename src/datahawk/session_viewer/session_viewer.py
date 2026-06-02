@@ -8,12 +8,12 @@ from pathlib import Path
 import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
-    QHBoxLayout, QTableWidget, QTableWidgetItem, QSplitter,
+    QHBoxLayout, QSplitter,
     QPushButton, QFileDialog, QSlider, QMessageBox, QCheckBox,
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
-from PySide6.QtGui import QBrush, QColor, QKeyEvent
+from PySide6.QtGui import QKeyEvent
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -26,6 +26,7 @@ from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
 from datahawk.map_widget import MapWidget
+from datahawk.session_viewer.lap_table import LapTable
 
 
 class SessionViewer(QMainWindow):
@@ -56,16 +57,10 @@ class SessionViewer(QMainWindow):
         top_splitter = QSplitter(Qt.Horizontal)
 
         # Lap table (fixed width 300)
-        self._table = QTableWidget()
-        self._table.setSelectionBehavior(QTableWidget.SelectItems)
-        self._table.setSelectionMode(QTableWidget.SingleSelection)
-        self._table.setFixedWidth(400)
-        font = self._table.font()
-        font.setPointSize(font.pointSize() - 1)
-        self._table.setFont(font)
-        self._table.setCursor(Qt.PointingHandCursor)
-        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._rebuild_lap_table()
+        self._table = LapTable()
+        self._table.rebuild(self._session)
+        self._table.lap_clicked.connect(self._on_lap_clicked)
+        self._table.sector_clicked.connect(self._on_sector_clicked)
         top_splitter.addWidget(self._table)
 
         # Video player
@@ -192,7 +187,6 @@ class SessionViewer(QMainWindow):
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_map_full)
-        self._table.cellClicked.connect(self._on_table_cell_clicked)
         self._btn_load.clicked.connect(self._load_video)
         self._btn_play.clicked.connect(self._toggle_play)
         self._player.durationChanged.connect(self._on_duration)
@@ -238,34 +232,7 @@ class SessionViewer(QMainWindow):
 
     def _rebuild_lap_table(self):
         """Rebuild the laps table with current sector columns."""
-        self._table.blockSignals(True)
-        n_sectors = len(self._session.laps[0].sector_times) if self._session.laps else 0
-        headers = ["Lap", "Time"] + [f"S{i+1}" for i in range(n_sectors)]
-        self._table.setColumnCount(len(headers))
-        self._table.setRowCount(len(self._session.laps))
-        self._table.setHorizontalHeaderLabels(headers)
-        purple = QBrush(QColor(128, 0, 128))
-        best_lap_idx = self._session.reference_lap_index
-        # Find fastest sector times
-        best_sectors = [float('inf')] * n_sectors
-        for lap in self._session.laps:
-            for s, st in enumerate(lap.sector_times):
-                if not math.isnan(st) and st < best_sectors[s]:
-                    best_sectors[s] = st
-        for i, lap in enumerate(self._session.laps):
-            self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            item = QTableWidgetItem(f"{lap.lap_time:.2f}")
-            if i == best_lap_idx:
-                item.setForeground(purple)
-            self._table.setItem(i, 1, item)
-            for s, st in enumerate(lap.sector_times):
-                text = f"{st:.2f}" if not math.isnan(st) else "—"
-                item = QTableWidgetItem(text)
-                if not math.isnan(st) and st == best_sectors[s]:
-                    item.setForeground(purple)
-                self._table.setItem(i, 2 + s, item)
-        self._table.resizeColumnsToContents()
-        self._table.blockSignals(False)
+        self._table.rebuild(self._session)
 
     def _load_video(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -417,9 +384,7 @@ class SessionViewer(QMainWindow):
                 break
 
         col = 2 + sector_idx  # columns: Lap, Time, S1, S2, ...
-        self._table.blockSignals(True)
-        self._table.setCurrentCell(self._active_lap_idx, col)
-        self._table.blockSignals(False)
+        self._table.select_cell(self._active_lap_idx, col)
 
     def _update_map(self):
         """Update the satellite map position marker."""
@@ -492,14 +457,14 @@ class SessionViewer(QMainWindow):
         session_time += 0.01
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
-    def _on_table_cell_clicked(self, row: int, col: int):
-        """Handle click on a table cell — jump to lap or sector."""
-        if col < 2:  # Lap or Time column
-            if row != self._active_lap_idx:
-                self.jump_to_lap(row)
-        else:  # Sector columns
-            sector_idx = col - 2
-            self.jump_to_sector(row, sector_idx)
+    def _on_lap_clicked(self, row: int):
+        """Handle lap click from table."""
+        if row != self._active_lap_idx:
+            self.jump_to_lap(row)
+
+    def _on_sector_clicked(self, row: int, sector_idx: int):
+        """Handle sector click from table."""
+        self.jump_to_sector(row, sector_idx)
 
     def _on_plot_click(self, event):
         """Handle click on the plot to seek to that time."""
