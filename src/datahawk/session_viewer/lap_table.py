@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
 from PySide6.QtCore import Qt, Signal
@@ -11,11 +12,22 @@ from PySide6.QtGui import QBrush, QColor
 from datahawk.types import Session
 
 
+@dataclass
+class LapTableLapClicked:
+    lap_idx: int
+
+
+@dataclass
+class LapTableSectorClicked:
+    lap_idx: int
+    sector_idx: int
+
+
 class LapTable(QTableWidget):
     """Table displaying lap times and sector splits with fastest highlights."""
 
-    lap_clicked = Signal(int)  # row index
-    sector_clicked = Signal(int, int)  # row index, sector index
+    lap_clicked = Signal(object)  # LapTableLapClicked
+    sector_clicked = Signal(object)  # LapTableSectorClicked
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -64,14 +76,15 @@ class LapTable(QTableWidget):
         self.resizeColumnsToContents()
         self.blockSignals(False)
 
-    def select_cell(self, row: int, col: int):
-        """Programmatically select a cell without emitting signals."""
+    def select_sector(self, lap_idx: int, sector_idx: int):
+        """Highlight the given sector cell for a lap."""
+        col = 2 + sector_idx
         self.blockSignals(True)
-        self.setCurrentCell(row, col)
+        self.setCurrentCell(lap_idx, col)
         self.blockSignals(False)
 
     def _on_cell_clicked(self, row: int, col: int):
         if col < 2:
-            self.lap_clicked.emit(row)
+            self.lap_clicked.emit(LapTableLapClicked(lap_idx=row))
         else:
-            self.sector_clicked.emit(row, col - 2)
+            self.sector_clicked.emit(LapTableSectorClicked(lap_idx=row, sector_idx=col - 2))

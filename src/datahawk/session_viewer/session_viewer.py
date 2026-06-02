@@ -26,7 +26,7 @@ from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
 from datahawk.map_widget import MapWidget
-from datahawk.session_viewer.lap_table import LapTable
+from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 
 
 class SessionViewer(QMainWindow):
@@ -383,8 +383,7 @@ class SessionViewer(QMainWindow):
             else:
                 break
 
-        col = 2 + sector_idx  # columns: Lap, Time, S1, S2, ...
-        self._table.select_cell(self._active_lap_idx, col)
+        self._table.select_sector(self._active_lap_idx, sector_idx)
 
     def _update_map(self):
         """Update the satellite map position marker."""
@@ -457,14 +456,14 @@ class SessionViewer(QMainWindow):
         session_time += 0.01
         self.jump_to_time(session_time)
         self.jump_video_to_time(session_time)
-    def _on_lap_clicked(self, row: int):
+    def _on_lap_clicked(self, event: LapTableLapClicked):
         """Handle lap click from table."""
-        if row != self._active_lap_idx:
-            self.jump_to_lap(row)
+        if event.lap_idx != self._active_lap_idx:
+            self.jump_to_lap(event.lap_idx)
 
-    def _on_sector_clicked(self, row: int, sector_idx: int):
+    def _on_sector_clicked(self, event: LapTableSectorClicked):
         """Handle sector click from table."""
-        self.jump_to_sector(row, sector_idx)
+        self.jump_to_sector(event.lap_idx, event.sector_idx)
 
     def _on_plot_click(self, event):
         """Handle click on the plot to seek to that time."""
