@@ -7,13 +7,11 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QSplitter,
-    QPushButton, QFileDialog, QSlider, QMessageBox, QCheckBox,
+    QPushButton, QMessageBox, QCheckBox,
     QTabWidget,
 )
-from PySide6.QtCore import Qt, QTimer, QUrl, QEvent
+from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.source.channel_constants import GPS_SPEED, GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING
 from datahawk.session_processing import process_session
@@ -26,6 +24,7 @@ from datahawk.storage import save_track_sectors, load_track_sectors, save_track_
 from datahawk.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
+from datahawk.session_viewer.video_player import VideoPlayer
 
 
 class SessionViewer(QMainWindow):
@@ -39,7 +38,6 @@ class SessionViewer(QMainWindow):
         if saved_sectors is not None:
             self._session.track.sector_split_lines = saved_sectors
         populate_sectors(self._session)
-        self._video_offset: float | None = None  # None = no sync
         self._initial_video_path = video_path  # for GoPro sessions
 
         meta_time = self._session.start_time
@@ -63,43 +61,11 @@ class SessionViewer(QMainWindow):
         top_splitter.addWidget(self._table)
 
         # Video player
-        video_container = QWidget()
-        video_layout = QVBoxLayout(video_container)
-        video_layout.setContentsMargins(0, 0, 0, 0)
+        self._video = VideoPlayer()
+        self._video.set_source_session(source_session)
+        self._video.session_time_changed.connect(self.jump_to_time)
 
-        self._video_widget = QVideoWidget()
-        video_layout.addWidget(self._video_widget, 1)  # video takes all space
-
-        # Video controls (overlay at bottom, minimal height)
-        ctrl_row = QHBoxLayout()
-        ctrl_row.setContentsMargins(0, 0, 0, 0)
-        self._btn_load = QPushButton("Load Video")
-        self._btn_load.setFixedHeight(24)
-        self._btn_play = QPushButton("▶")
-        self._btn_play.setFixedSize(30, 24)
-        self._btn_play.setEnabled(False)
-        self._video_slider = QSlider(Qt.Horizontal)
-        self._video_slider.setEnabled(False)
-        self._video_slider.setFixedHeight(20)
-        self._lbl_time = QLabel("--:-- / --:--")
-        self._btn_sync = QPushButton("🔗")
-        self._btn_sync.setFixedSize(30, 24)
-        self._btn_sync.setCheckable(True)
-        self._btn_sync.setEnabled(False)
-        self._btn_sync.setToolTip("Sync video ↔ graph")
-        self._btn_sync.clicked.connect(self._toggle_sync)
-        ctrl_row.addWidget(self._btn_load)
-        ctrl_row.addWidget(self._btn_play)
-        ctrl_row.addWidget(self._btn_sync)
-        ctrl_row.addWidget(self._video_slider)
-        ctrl_row.addWidget(self._lbl_time)
-        video_layout.addLayout(ctrl_row)
-
-        # Hidden sync label (still computed, just not shown)
-        self._lbl_offset = QLabel()
-        self._lbl_offset.setVisible(False)
-
-        top_splitter.addWidget(video_container)
+        top_splitter.addWidget(self._video)
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
         top_splitter.setStretchFactor(1, 1)  # video takes remaining space
 
@@ -160,12 +126,6 @@ class SessionViewer(QMainWindow):
         vsplitter.setSizes([500, 250])
         main_layout.addWidget(vsplitter)
 
-        # Media player
-        self._player = QMediaPlayer()
-        self._audio = QAudioOutput()
-        self._player.setAudioOutput(self._audio)
-        self._player.setVideoOutput(self._video_widget)
-
         # Populate channel dropdown
         self._channel_names: list[str] = []
         if self._session.laps:
@@ -179,16 +139,6 @@ class SessionViewer(QMainWindow):
         self._combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_plot)
         self._ref_combo.currentIndexChanged.connect(self._update_map_full)
-        self._btn_load.clicked.connect(self._load_video)
-        self._btn_play.clicked.connect(self._toggle_play)
-        self._player.durationChanged.connect(self._on_duration)
-        self._player.positionChanged.connect(self._on_position)
-        self._video_slider.sliderMoved.connect(self._seek_video)
-
-        # Sync timer: update cursor from video position at 50Hz
-        self._sync_timer = QTimer()
-        self._sync_timer.setInterval(20)  # 50Hz
-        self._sync_timer.timeout.connect(self._sync_cursor)
 
         # Select first lap
         self._active_lap_idx = 0
@@ -200,16 +150,7 @@ class SessionViewer(QMainWindow):
 
         # Auto-load video if provided (GoPro sessions)
         if self._initial_video_path and self._initial_video_path.exists():
-            self._player.setSource(QUrl.fromLocalFile(str(self._initial_video_path)))
-            self._btn_play.setEnabled(True)
-            self._video_slider.setEnabled(True)
-            self._player.setPosition(1)
-            # GoPro sessions: video IS the telemetry source, offset is always 0
-            self._video_offset = 0.0
-            self._btn_sync.setEnabled(True)
-            self._btn_sync.setChecked(True)
-            self._btn_sync.setStyleSheet("background-color: green;")
-            self._sync_timer.start()
+            self._video.load_video(self._initial_video_path, is_gopro_session=True)
 
 
     def _rebuild_ref_combo(self):
@@ -225,116 +166,13 @@ class SessionViewer(QMainWindow):
         """Rebuild the laps table with current sector columns."""
         self._table.rebuild(self._session)
 
-    def _load_video(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load Video", str(self._xrz_path.parent), "Video (*.mp4 *.MP4 *.mov *.avi)")
-        if not path:
-            return
-
-        self._player.setSource(QUrl.fromLocalFile(path))
-        self._btn_play.setEnabled(True)
-        self._video_slider.setEnabled(True)
-        self._lbl_offset.setText("Sync: computing...")
-
-        # Run sync in background (takes ~0.4s)
-        QTimer.singleShot(100, lambda: self._compute_sync(path))
-
-    def _compute_sync(self, video_path: str):
-        try:
-            from datahawk.source.gopro.gopro_video_sync import is_gopro_video
-            from datahawk.source.gopro.gopro_video_sync import sync_by_acceleration as gopro_sync_accel
-            from datahawk.source.gopro.gopro_video_sync import sync_by_timestamp as gopro_sync_ts
-            from datahawk.source.insta360.insta360_video_sync import is_insta360_video
-            from datahawk.source.insta360.insta360_video_sync import sync_by_acceleration as insta360_sync_accel
-
-            # Skip sync computation for GoPro sessions (video IS the telemetry source)
-            if self._initial_video_path:
-                self._video_offset = 0.0
-                self._lbl_offset.setText("Sync: 0.00s (GoPro)")
-                self._btn_sync.setEnabled(True)
-                self._btn_sync.setChecked(True)
-                self._btn_sync.setStyleSheet("background-color: green;")
-                self._sync_timer.start()
-                return
-
-            parsed = self._source_session
-
-            if is_insta360_video(video_path):
-                result = insta360_sync_accel(video_path, parsed)
-            elif is_gopro_video(video_path):
-                result = gopro_sync_accel(video_path, parsed)
-                if result.confidence == "low":
-                    ts_result = gopro_sync_ts(video_path, parsed)
-                    if abs(ts_result.offset_seconds) < 86400:  # clock seems valid
-                        result = ts_result
-            else:
-                # Try GoPro sync as fallback for unknown cameras
-                result = gopro_sync_accel(video_path, parsed)
-                if result.confidence == "low":
-                    ts_result = gopro_sync_ts(video_path, parsed)
-                    if abs(ts_result.offset_seconds) < 86400:
-                        result = ts_result
-
-            self._video_offset = result.offset_seconds
-            label = f"Sync: {result.offset_seconds:+.2f}s ({result.method}"
-            if result.method == "accel":
-                label += f", r={result.correlation:.2f}, {result.confidence})"
-            else:
-                label += ")"
-            self._lbl_offset.setText(label)
-            self._btn_sync.setEnabled(True)
-            self._btn_sync.setChecked(True)
-            self._btn_sync.setStyleSheet("background-color: green;")
-            self._sync_timer.start()
-        except Exception as e:
-            self._lbl_offset.setText(f"Sync failed: {e}")
-            self._video_offset = None
-            self._btn_sync.setEnabled(True)
-            self._btn_sync.setChecked(False)
-
-    def _toggle_play(self):
-        if self._player.playbackState() == QMediaPlayer.PlayingState:
-            self._player.pause()
-            self._btn_play.setText("▶")
-            if self._video_offset is not None:
-                self._sync_timer.stop()
-        else:
-            self._player.play()
-            self._btn_play.setText("⏸")
-            if self._video_offset is not None:
-                self._sync_timer.start()
-
-    def _toggle_sync(self):
-        """Toggle sync between video and graph. When enabling, set offset from current positions."""
-        if self._btn_sync.isChecked():
-            video_s = self._player.position() / 1000.0
-            self._video_offset = video_s - self._current_session_time
-            self._btn_sync.setStyleSheet("background-color: green;")
-            if self._player.playbackState() == QMediaPlayer.PlayingState:
-                self._sync_timer.start()
-        else:
-            self._video_offset = None
-            self._btn_sync.setStyleSheet("")
-            self._sync_timer.stop()
-
-    def _on_duration(self, ms):
-        self._video_slider.setRange(0, ms)
-
-    def _on_position(self, ms):
-        if not self._video_slider.isSliderDown():
-            self._video_slider.setValue(ms)
-        dur = self._player.duration()
-        self._lbl_time.setText(f"{ms // 60000}:{(ms // 1000) % 60:02d} / {dur // 60000}:{(dur // 1000) % 60:02d}")
-
-    def _seek_video(self, ms):
-        self._player.setPosition(ms)
-
     def jump_to_time(self, session_time: float):
         """Jump to a given session time: select the active lap and place the cursor."""
         if not self._session.laps:
             return
 
         self._current_session_time = session_time
+        self._video.update_session_time(session_time)
 
         # Find active lap by comparing against lap start times
         lap_idx = 0
@@ -394,13 +232,6 @@ class SessionViewer(QMainWindow):
             return self._session.temporal_index[-1].sample_index if self._session.temporal_index else 0
         return self._session.temporal_index[idx].sample_index
 
-    def jump_video_to_time(self, session_time: float):
-        """Seek video to match a given session time (only if sync is on)."""
-        if self._video_offset is None:
-            return
-        video_s = session_time + self._video_offset
-        self._player.setPosition(int(video_s * 1000))
-
     def jump_to_lap(self, lap_idx: int):
         """Jump to target lap at the same spatial position as current cursor."""
         if lap_idx == self._active_lap_idx:
@@ -424,7 +255,7 @@ class SessionViewer(QMainWindow):
             session_time = target_lap.lap_start_time
 
         self.jump_to_time(session_time)
-        self.jump_video_to_time(session_time)
+        self._video.seek_to_session_time(session_time)
 
     def jump_to_sector(self, lap_idx: int, sector_idx: int):
         """Jump to the beginning of a sector in a given lap."""
@@ -441,7 +272,7 @@ class SessionViewer(QMainWindow):
             return
         session_time += 0.01
         self.jump_to_time(session_time)
-        self.jump_video_to_time(session_time)
+        self._video.seek_to_session_time(session_time)
     def _on_lap_clicked(self, event: LapTableLapClicked):
         """Handle lap click from table."""
         if event.lap_idx != self._active_lap_idx:
@@ -454,7 +285,7 @@ class SessionViewer(QMainWindow):
     def _on_graph_click(self, event: GraphClicked):
         """Handle click on the graph to seek to that time."""
         self.jump_to_time(event.session_time)
-        self.jump_video_to_time(event.session_time)
+        self._video.seek_to_session_time(event.session_time)
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
@@ -564,16 +395,6 @@ class SessionViewer(QMainWindow):
         self._update_map_full()
         self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
 
-    def _sync_cursor(self):
-        """Update plot cursor and active lap from video position."""
-        if not self._session.laps or self._video_offset is None:
-            return
-
-        video_ms = self._player.position()
-        video_s = video_ms / 1000.0
-        session_time = video_s - self._video_offset
-        self.jump_to_time(session_time)
-
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress:
             key = event.key()
@@ -586,7 +407,7 @@ class SessionViewer(QMainWindow):
                 self.jump_to_lap(prev_idx)
                 return True
             elif key == Qt.Key_Space:
-                self._toggle_play()
+                self._video.toggle_play()
                 return True
             elif key == Qt.Key_Left:
                 self.jump_to_time(self._current_session_time - 5.0)
@@ -597,8 +418,7 @@ class SessionViewer(QMainWindow):
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
-        self._sync_timer.stop()
-        self._player.stop()
+        self._video.stop()
         super().closeEvent(event)
 
     def _update_plot(self, *_args):
