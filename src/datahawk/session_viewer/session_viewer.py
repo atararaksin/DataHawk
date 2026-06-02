@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-
-import pyqtgraph as pg
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QSplitter,
@@ -27,6 +25,7 @@ from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
 from datahawk.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
+from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 
 
 class SessionViewer(QMainWindow):
@@ -144,22 +143,15 @@ class SessionViewer(QMainWindow):
         self._bottom_tabs.setTabPosition(QTabWidget.South)
 
         # Plot widget
-        self._plot = pg.PlotWidget()
-        self._plot.setLabel("bottom", "Time", units="s")
-        self._plot.showGrid(x=True, y=True, alpha=0.3)
-        self._plot.scene().sigMouseClicked.connect(self._on_plot_click)
-        self._bottom_tabs.addTab(self._plot, "Graph")
+        self._graph = TelemetryGraph()
+        self._graph.clicked.connect(self._on_graph_click)
+        self._bottom_tabs.addTab(self._graph, "Graph")
 
         # Satellite map widget
         self._map = MapWidget()
         self._bottom_tabs.addTab(self._map, "Map")
 
         bottom_layout.addWidget(self._bottom_tabs)
-
-        # Cursor line on plot
-        self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
-        self._cursor.setVisible(False)
-        self._plot.addItem(self._cursor)
 
         # === Main vertical splitter: top (2/3) + bottom (1/3) ===
         vsplitter = QSplitter(Qt.Vertical)
@@ -217,7 +209,6 @@ class SessionViewer(QMainWindow):
             self._btn_sync.setEnabled(True)
             self._btn_sync.setChecked(True)
             self._btn_sync.setStyleSheet("background-color: green;")
-            self._cursor.setVisible(True)
             self._sync_timer.start()
 
 
@@ -263,7 +254,6 @@ class SessionViewer(QMainWindow):
                 self._btn_sync.setEnabled(True)
                 self._btn_sync.setChecked(True)
                 self._btn_sync.setStyleSheet("background-color: green;")
-                self._cursor.setVisible(True)
                 self._sync_timer.start()
                 return
 
@@ -295,7 +285,6 @@ class SessionViewer(QMainWindow):
             self._btn_sync.setEnabled(True)
             self._btn_sync.setChecked(True)
             self._btn_sync.setStyleSheet("background-color: green;")
-            self._cursor.setVisible(True)
             self._sync_timer.start()
         except Exception as e:
             self._lbl_offset.setText(f"Sync failed: {e}")
@@ -320,7 +309,6 @@ class SessionViewer(QMainWindow):
         if self._btn_sync.isChecked():
             video_s = self._player.position() / 1000.0
             self._video_offset = video_s - self._current_session_time
-            self._cursor.setVisible(True)
             self._btn_sync.setStyleSheet("background-color: green;")
             if self._player.playbackState() == QMediaPlayer.PlayingState:
                 self._sync_timer.start()
@@ -362,10 +350,8 @@ class SessionViewer(QMainWindow):
             self._update_plot()
             self._update_map_full()
 
-        # Position cursor: X axis is time relative to lap start
-        cursor_x = session_time - self._session.laps[lap_idx].lap_start_time
-        self._cursor.setVisible(True)
-        self._cursor.setPos(cursor_x)
+        # Position cursor
+        self._graph.set_cursor_session_time(session_time)
 
         self._select_active_table_cell()
         self._update_map()
@@ -465,15 +451,10 @@ class SessionViewer(QMainWindow):
         """Handle sector click from table."""
         self.jump_to_sector(event.lap_idx, event.sector_idx)
 
-    def _on_plot_click(self, event):
-        """Handle click on the plot to seek to that time."""
-        pos = event.scenePos()
-        if not self._plot.sceneBoundingRect().contains(pos):
-            return
-        mouse_point = self._plot.plotItem.vb.mapSceneToView(pos)
-        session_time = self._session.laps[self._active_lap_idx].lap_start_time + mouse_point.x()
-        self.jump_to_time(session_time)
-        self.jump_video_to_time(session_time)
+    def _on_graph_click(self, event: GraphClicked):
+        """Handle click on the graph to seek to that time."""
+        self.jump_to_time(event.session_time)
+        self.jump_video_to_time(event.session_time)
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
@@ -621,79 +602,14 @@ class SessionViewer(QMainWindow):
         super().closeEvent(event)
 
     def _update_plot(self, *_args):
-        self._plot.clear()
-        self._plot.addItem(self._cursor)
-
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
-
-        lap_idx = self._active_lap_idx
         ch_name = self._channel_names[self._combo.currentIndex()]
-        lap = self._session.laps[lap_idx]
-
-        if ch_name not in lap.channels:
-            return
-
-        ch = lap.channels[ch_name]
         ref_sel = self._ref_combo.currentIndex() - 1
-
-        if self._diff_cb.isChecked():
-            # Diff mode: current - ref, using reindexed samples
-            mc = lap.master_clk
-            if not mc:
-                return
-            t0 = lap.lap_start_time
-            ref_lap = self._session.laps[ref_sel] if ref_sel >= 0 and ref_sel != lap_idx else None
-            ref_ch = ref_lap.channels.get(ch_name) if ref_lap else None
-
-            diff_times = []
-            diff_values = []
-            for i, (t, cur_v) in enumerate(zip(mc.samples, ch.samples)):
-                if math.isnan(t) or math.isnan(cur_v):
-                    continue
-                if ref_ch and i < len(ref_ch.samples) and not math.isnan(ref_ch.samples[i]):
-                    diff_times.append(t - t0)
-                    diff_values.append(cur_v - ref_ch.samples[i])
-                else:
-                    diff_times.append(t - t0)
-                    diff_values.append(float('nan'))
-
-            self._plot.setLabel("left", f"{ch_name} (diff)")
-            if diff_times:
-                self._plot.plot(diff_times, diff_values, pen=pg.mkPen("c", width=1), name="Diff")
-        else:
-            # Normal mode: current lap + optional ref overlay
-            times = ch.raw_timestamps
-            samples = ch.raw_values
-
-            self._plot.setLabel("left", ch_name)
-            self._plot.plot(times, samples, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
-
-            # Reference lap overlay
-            if ref_sel >= 0 and ref_sel != lap_idx:
-                ref_lap = self._session.laps[ref_sel]
-                if ch_name in ref_lap.channels:
-                    mc = lap.master_clk
-                    if mc:
-                        t0 = lap.lap_start_time
-                        ref_times = []
-                        ref_samples = []
-                        for t, v in zip(mc.samples, ref_lap.channels[ch_name].samples):
-                            if t == t and v == v:  # skip NaN
-                                ref_times.append(t - t0)
-                                ref_samples.append(v)
-                        if ref_times:
-                            self._plot.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_sel + 1}")
-
-        # Sector split lines
-        s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),
-                                  label="S1", labelOpts={"position": 0.95, "color": "w"})
-        self._plot.addItem(s1_line)
-        for i, split_time in enumerate(lap.sector_split_times):
-            if not math.isnan(split_time):
-                x = split_time - lap.lap_start_time
-                line = pg.InfiniteLine(pos=x, angle=90, pen=pg.mkPen("w", width=1),
-                                       label=f"S{i+2}", labelOpts={"position": 0.95, "color": "w"})
-                self._plot.addItem(line)
-
-        self._plot.enableAutoRange()
+        self._graph.update_plot(
+            session=self._session,
+            lap_idx=self._active_lap_idx,
+            channel_name=ch_name,
+            ref_lap_idx=ref_sel if ref_sel >= 0 else None,
+            diff_mode=self._diff_cb.isChecked(),
+        )
