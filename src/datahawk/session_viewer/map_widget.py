@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QGraphicsPixmapItem
 
 from datahawk.types import Lap, Track, Session
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE
+from datahawk.session_utils import get_sample_index_for_session_time
 
 # Esri World Imagery (free, no API key required)
 TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -89,7 +90,7 @@ class MapWidget(pg.PlotWidget):
 
     def update_position(self, session_time: float):
         """Update the current position marker for a given session time."""
-        sample_idx = self._session_time_to_sample_idx(session_time)
+        sample_idx = get_sample_index_for_session_time(self._session, session_time) if self._session else 0
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
@@ -113,17 +114,6 @@ class MapWidget(pg.PlotWidget):
                 self._cur_marker = self.plot(
                     [x], [y], pen=None, symbol="o", symbolSize=8,
                     symbolBrush="y", symbolPen="w")
-
-    def _session_time_to_sample_idx(self, session_time: float) -> int:
-        if not self._session or not self._session.temporal_index:
-            return 0
-        start = self._session.laps[0].lap_start_time
-        idx = int((session_time - start) / self._session.time_resolution)
-        if idx < 0:
-            return 0
-        if idx >= len(self._session.temporal_index):
-            return self._session.temporal_index[-1].sample_index
-        return self._session.temporal_index[idx].sample_index
 
     def _to_plot(self, lat: float, lon: float) -> tuple[float, float]:
         """Convert lat/lon to plot coordinates."""

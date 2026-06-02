@@ -17,7 +17,7 @@ from datahawk.source.channel_constants import GPS_SPEED, GPS_LATITUDE, GPS_LONGI
 from datahawk.session_processing import process_session
 from datahawk.types import Point
 from datahawk.utils.gps_utils import create_perpendecular_line
-from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
+from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_sector_split_line_at_time, get_lap_idx_by_session_time
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import save_track_sectors, load_track_sectors, save_track_sf_line, load_track_sf_line, delete_track
@@ -175,13 +175,7 @@ class SessionViewer(QMainWindow):
         self._current_session_time = session_time
         self._video.update_session_time(session_time)
 
-        # Find active lap by comparing against lap start times
-        lap_idx = 0
-        for i, lap in enumerate(self._session.laps):
-            if session_time >= lap.lap_start_time:
-                lap_idx = i
-            else:
-                break
+        lap_idx = get_lap_idx_by_session_time(self._session, session_time)
 
         # Select lap if changed
         if lap_idx != self._active_lap_idx:
@@ -222,16 +216,6 @@ class SessionViewer(QMainWindow):
         self._map.set_track(self._session.track)
         self._map.set_laps(current_lap, ref_lap)
 
-    def get_sample_index_for_session_time(self, session_time: float) -> int:
-        """Get the reindexed sample index for a given session time using the temporal index."""
-        start = self._session.laps[0].lap_start_time
-        idx = int((session_time - start) / self._session.time_resolution)
-        if idx < 0:
-            return 0
-        if idx >= len(self._session.temporal_index):
-            return self._session.temporal_index[-1].sample_index if self._session.temporal_index else 0
-        return self._session.temporal_index[idx].sample_index
-
     def jump_to_lap(self, lap_idx: int):
         """Jump to target lap at the same spatial position as current cursor."""
         if lap_idx == self._active_lap_idx:
@@ -240,7 +224,7 @@ class SessionViewer(QMainWindow):
             return
 
         # Find spatial position (sample index) at current cursor
-        sample_idx = self.get_sample_index_for_session_time(self._current_session_time)
+        sample_idx = get_sample_index_for_session_time(self._session, self._current_session_time)
 
         # Look up the same spatial position in target lap's Master Clk
         target_lap = self._session.laps[lap_idx]
@@ -289,36 +273,10 @@ class SessionViewer(QMainWindow):
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
-        session_time = self._current_session_time
-        sample_idx = self.get_sample_index_for_session_time(session_time)
-
-        # Check if within track limits using Master Clk continuity on current lap
-        current_lap = self._session.laps[self._active_lap_idx]
-        mc_ch = current_lap.master_clk
-        if mc_ch and sample_idx + 1 < len(mc_ch.samples):
-            if math.isnan(mc_ch.samples[sample_idx]) or math.isnan(mc_ch.samples[sample_idx + 1]):
-                QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
-                return
-
-        # Get reference lap's lat/lon/heading at this spatial position
-        ref_lap = self._session.laps[self._session.reference_lap_index]
-        lat_ch = ref_lap.gps_lat
-        lon_ch = ref_lap.gps_lon
-        heading_ch = ref_lap.gps_heading
-
-        if not (lat_ch and lon_ch and heading_ch):
-            QMessageBox.warning(self, "Error", "Can't split sector here - missing GPS channels")
+        split_line = create_sector_split_line_at_time(self._session, self._current_session_time)
+        if split_line is None:
             return
 
-        lat = lat_ch.samples[sample_idx]
-        lon = lon_ch.samples[sample_idx]
-        heading = heading_ch.samples[sample_idx]
-
-        if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
-            QMessageBox.warning(self, "Error", "Can't split sector here - outside track limits")
-            return
-
-        split_line = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
         self._session.track.sector_split_lines.append(split_line)
         populate_sectors(self._session)
         save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
