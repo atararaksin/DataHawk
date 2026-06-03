@@ -18,7 +18,7 @@ from datahawk.session_utils import get_channel_value_in_another_lap_with_interpo
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import delete_track
 from datahawk.session_viewer.map_widget import MapWidget
-from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked, LapTableRefClicked
+from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
 
@@ -45,12 +45,20 @@ class SessionViewer(QWidget):
         # === Top section (2/3 height): lap table + video side by side ===
         top_splitter = QSplitter(Qt.Horizontal)
 
-        # Lap table (fixed width 300)
+        # Lap table + controls
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0, 0, 0, 0)
         self._table = LapTable()
         self._table.rebuild(self._session)
         self._table.lap_clicked.connect(self._on_lap_clicked)
         self._table.sector_clicked.connect(self._on_sector_clicked)
-        top_splitter.addWidget(self._table)
+        table_layout.addWidget(self._table)
+        self._btn_set_ref = QPushButton("Set as Reference")
+        self._btn_set_ref.clicked.connect(self._on_set_ref_clicked)
+        table_layout.addWidget(self._btn_set_ref)
+        table_container.setFixedWidth(400)
+        top_splitter.addWidget(table_container)
 
         # Video player
         self._video = VideoPlayer()
@@ -127,7 +135,6 @@ class SessionViewer(QWidget):
 
         # Reference lap (set externally by AnalysisWindow)
         self._ref_lap = None
-        self._table.ref_clicked.connect(self._on_ref_clicked)
 
         # Select first lap
         self._active_lap_idx = 0
@@ -248,10 +255,10 @@ class SessionViewer(QWidget):
         self.jump_to_time(event.session_time)
         self._video.seek_to_session_time(event.session_time)
 
-    def _on_ref_clicked(self, event: LapTableRefClicked):
-        """Handle ref column click — emit the selected lap as reference."""
-        if event.lap_idx < len(self._session.laps):
-            self.ref_selected.emit(self._session.laps[event.lap_idx])
+    def _on_set_ref_clicked(self):
+        """Set current lap as the reference lap."""
+        if self._active_lap_idx < len(self._session.laps):
+            self.ref_selected.emit(self._session.laps[self._active_lap_idx])
 
     def set_reference_lap(self, lap):
         """Set the reference lap (from any session) and refresh display."""
