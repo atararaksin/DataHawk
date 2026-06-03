@@ -1,46 +1,45 @@
-"""Session viewer window with laps table, telemetry plot, video player, and sync cursor."""
+"""Session viewer widget with laps table, telemetry plot, video player, and sync cursor."""
 
 from __future__ import annotations
 
 import math
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QMainWindow, QVBoxLayout, QWidget, QComboBox, QLabel,
+    QVBoxLayout, QWidget, QComboBox, QLabel,
     QHBoxLayout, QSplitter,
-    QPushButton, QMessageBox, QCheckBox,
+    QPushButton, QCheckBox,
     QTabWidget,
 )
-from PySide6.QtCore import Qt, QEvent
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import Qt, QEvent, Signal
 
 from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import build_session
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_perpendicular_line_at_time, get_lap_idx_by_session_time
 from datahawk.session_processing import populate_sectors
-from datahawk.storage import delete_track, save_track, load_track
+from datahawk.storage import delete_track
 from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
 
 
-class SessionViewer(QMainWindow):
+class SessionViewer(QWidget):
+    """Session viewer tab widget. Emits track_changed when track is mutated."""
+
+    track_changed = Signal(object)  # emits Track
+
     def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None):
         super().__init__(parent)
         self._source_session = source_session
         self._session = session
+        self._session_id = getattr(source_session.metadata, 'original_filename', '') or ''
         populate_sectors(self._session)
         self._initial_video_path = video_path  # for GoPro sessions
 
-        meta_time = self._session.start_time
-        self.setWindowTitle(f"DataHawk — {self._session.track} {self._session.date} {meta_time}")
-        self.setMinimumSize(1200, 700)
         from PySide6.QtWidgets import QApplication
         QApplication.instance().installEventFilter(self)
 
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
+        main_layout = QVBoxLayout(self)
 
         # === Top section (2/3 height): lap table + video side by side ===
         top_splitter = QSplitter(Qt.Horizontal)
@@ -269,12 +268,9 @@ class SessionViewer(QMainWindow):
         if split_line is None:
             return
 
-        self._session.track.sector_split_lines.append(split_line)
-        populate_sectors(self._session)
-        save_track(self._session.track)
-        self._rebuild_lap_table()
-        self._update_plot()
-        self._update_map_full()
+        track = self._session.track
+        track.sector_split_lines.append(split_line)
+        self.track_changed.emit(track)
 
     def _remove_sector_split(self):
         """Remove all sector splits within ±2s of current time."""
@@ -289,13 +285,10 @@ class SessionViewer(QMainWindow):
         if not to_remove:
             return
 
+        track = self._session.track
         for i in reversed(to_remove):
-            del self._session.track.sector_split_lines[i]
-        populate_sectors(self._session)
-        save_track(self._session.track)
-        self._rebuild_lap_table()
-        self._update_plot()
-        self._update_map_full()
+            del track.sector_split_lines[i]
+        self.track_changed.emit(track)
 
     def _clear_track(self):
         """Evict track from DB and reload session with auto-detected SF."""
@@ -306,19 +299,10 @@ class SessionViewer(QMainWindow):
         sf_line = detect_sf_line(self._source_session)
         master_lap = detect_master_lap(self._source_session, sf_line)
         track = Track(name=self._session.track.name, sf_line=sf_line, master_lap=master_lap)
-        save_track(track)
-        self._session = build_session(self._source_session, track)
-        populate_sectors(self._session)
-        self._map.set_session(self._session)
-        self._active_lap_idx = 0
-        self._rebuild_lap_table()
-        self._rebuild_ref_combo()
-        self._update_plot()
-        self._update_map_full()
-        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
+        self.track_changed.emit(track)
 
     def _replace_sf_line(self):
-        """Replace the S/F line with a perpendicular line at the current position, and reinitialize the session."""
+        """Replace the S/F line with a perpendicular line at the current position."""
         from datahawk.session_processing import detect_master_lap
         from datahawk.types import Track
 
@@ -326,7 +310,6 @@ class SessionViewer(QMainWindow):
         if new_sf is None:
             return
 
-        # Re-detect master lap with new SF line and rebuild track
         master_lap = detect_master_lap(self._source_session, new_sf)
         track = Track(
             name=self._session.track.name,
@@ -334,20 +317,7 @@ class SessionViewer(QMainWindow):
             master_lap=master_lap,
             sector_split_lines=self._session.track.sector_split_lines,
         )
-        save_track(track)
-
-        # Re-process with new track
-        self._session = build_session(self._source_session, track)
-
-        populate_sectors(self._session)
-
-        # Rebuild UI
-        self._active_lap_idx = 0
-        self._rebuild_lap_table()
-        self._rebuild_ref_combo()
-        self._update_plot()
-        self._update_map_full()
-        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
+        self.track_changed.emit(track)
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress:
@@ -374,6 +344,22 @@ class SessionViewer(QMainWindow):
     def closeEvent(self, event):
         self._video.stop()
         super().closeEvent(event)
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    def rebuild_with_track(self, track):
+        """Rebuild session with a new track. Called by AnalysisWindow on track changes."""
+        self._session = build_session(self._source_session, track)
+        populate_sectors(self._session)
+        self._map.set_session(self._session)
+        self._active_lap_idx = 0
+        self._rebuild_lap_table()
+        self._rebuild_ref_combo()
+        self._update_plot()
+        self._update_map_full()
+        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
 
     def _update_plot(self, *_args):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):

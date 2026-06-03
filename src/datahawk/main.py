@@ -11,7 +11,7 @@ from PySide6.QtGui import QAction
 
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
-from datahawk.session_viewer import SessionViewer
+from datahawk.session_viewer import SessionViewer, AnalysisWindow
 from datahawk.storage import get_session_file_path, get_session_track_name, load_track, save_track
 
 
@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("DataHawk")
         self.setMinimumSize(1024, 768)
-        self._viewers: list[SessionViewer] = []
+        self._analysis_windows: dict[str, AnalysisWindow] = {}  # track_name -> window
 
         # Toolbar
         toolbar = QToolBar()
@@ -106,10 +106,10 @@ class MainWindow(QMainWindow):
             parsed.metadata.date = ""
 
             session = build_session(parsed, track)
-            viewer = SessionViewer(parsed, session, video_path=Path(path))
-            viewer.setWindowTitle(f"DataHawk — {track.name} ({driver}) [GoPro]")
-            viewer.show()
-            self._viewers.append(viewer)
+            window = self._get_or_create_analysis_window(track_name)
+            window.add_session(parsed, session, video_path=Path(path), label=f"{driver} [GoPro]")
+            window.show()
+            window.raise_()
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to process GoPro video:\n{e}")
 
@@ -127,6 +127,12 @@ class MainWindow(QMainWindow):
         from datahawk.source.mychron.xrz_parser import parse_xrz
         from datahawk.session_processing import build_session
 
+        # Check if already open in existing window
+        window = self._analysis_windows.get(track_name)
+        if window and window.has_session(session_id):
+            window.raise_()
+            return
+
         parsed = parse_xrz(path)
 
         track = load_track(track_name)
@@ -135,9 +141,19 @@ class MainWindow(QMainWindow):
             return
 
         session = build_session(parsed, track)
-        viewer = SessionViewer(parsed, session)
-        viewer.show()
-        self._viewers.append(viewer)
+        window = self._get_or_create_analysis_window(track_name)
+        window.add_session(parsed, session, label=f"{session.date} {session.start_time}")
+        window.show()
+        window.raise_()
+
+    def _get_or_create_analysis_window(self, track_name: str) -> AnalysisWindow:
+        """Get existing or create new AnalysisWindow for a track."""
+        window = self._analysis_windows.get(track_name)
+        if window and window.isVisible():
+            return window
+        window = AnalysisWindow(track_name)
+        self._analysis_windows[track_name] = window
+        return window
 
 def main():
     app = QApplication(sys.argv)
