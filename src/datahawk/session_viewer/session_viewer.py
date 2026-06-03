@@ -13,12 +13,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QEvent
 from PySide6.QtGui import QKeyEvent
 
-from datahawk.source.channel_constants import GPS_SPEED, GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING
+from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import build_session
-from datahawk.types import Point
-from datahawk.utils.gps_utils import create_perpendecular_line
-from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_sector_split_line_at_time, get_lap_idx_by_session_time
-from datahawk.constants import CROSSING_LINE_LENGTH
+from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_perpendicular_line_at_time, get_lap_idx_by_session_time
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import delete_track, save_track, load_track
 from datahawk.session_viewer.map_widget import MapWidget
@@ -268,7 +265,7 @@ class SessionViewer(QMainWindow):
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
-        split_line = create_sector_split_line_at_time(self._session, self._current_session_time)
+        split_line = create_perpendicular_line_at_time(self._session, self._current_session_time)
         if split_line is None:
             return
 
@@ -326,18 +323,9 @@ class SessionViewer(QMainWindow):
         from datahawk.session_processing import detect_master_lap
         from datahawk.types import Track
 
-        ref_lap = self._session.laps[self._session.reference_lap_index]
-        lat = get_channel_value_in_another_lap_with_interpolation(
-            self._session, self._current_session_time, ref_lap, GPS_LATITUDE)
-        lon = get_channel_value_in_another_lap_with_interpolation(
-            self._session, self._current_session_time, ref_lap, GPS_LONGITUDE)
-        heading = get_channel_value_in_another_lap_with_interpolation(
-            self._session, self._current_session_time, ref_lap, GPS_HEADING)
-
-        if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
+        new_sf = create_perpendicular_line_at_time(self._session, self._current_session_time)
+        if new_sf is None:
             return
-
-        new_sf = create_perpendecular_line(Point(lat, lon), heading, CROSSING_LINE_LENGTH)
 
         # Re-detect master lap with new SF line and rebuild track
         master_lap = detect_master_lap(self._source_session, new_sf)

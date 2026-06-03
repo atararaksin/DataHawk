@@ -80,8 +80,11 @@ def get_channel_value_in_another_lap_with_interpolation(
     return val1 + frac * (val2 - val1)
 
 
-def create_sector_split_line_at_time(session: Session, session_time: float):
-    """Create a sector split line at the given session time. Returns the line or None if invalid."""
+def create_perpendicular_line_at_time(session: Session, session_time: float):
+    """Create a perpendicular line at the given session time using the track's master lap.
+    
+    Returns the Line or None if invalid.
+    """
     from datahawk.types import Point
     from datahawk.utils.gps_utils import create_perpendecular_line
     from datahawk.constants import CROSSING_LINE_LENGTH
@@ -95,20 +98,14 @@ def create_sector_split_line_at_time(session: Session, session_time: float):
         if math.isnan(mc_ch.samples[sample_idx]) or math.isnan(mc_ch.samples[sample_idx + 1]):
             return None
 
-    # Get reference lap's lat/lon/heading at this spatial position
-    ref_lap = session.laps[session.reference_lap_index]
-    lat_ch = ref_lap.gps_lat
-    lon_ch = ref_lap.gps_lon
-    heading_ch = ref_lap.gps_heading
-
-    if not (lat_ch and lon_ch and heading_ch):
-        return None
-    if sample_idx >= len(lat_ch.samples):
+    # Get master lap's lat/lon/heading at this spatial position
+    master_lap = session.track.master_lap
+    if sample_idx >= len(master_lap.lats):
         return None
 
-    lat = lat_ch.samples[sample_idx]
-    lon = lon_ch.samples[sample_idx]
-    heading = heading_ch.samples[sample_idx]
+    lat = master_lap.lats[sample_idx]
+    lon = master_lap.lons[sample_idx]
+    heading = master_lap.headings[sample_idx]
 
     if math.isnan(lat) or math.isnan(lon) or math.isnan(heading):
         return None
