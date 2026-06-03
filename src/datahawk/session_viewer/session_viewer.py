@@ -351,15 +351,14 @@ class SessionViewer(QWidget):
 
     def rebuild_with_track(self, track):
         """Rebuild session with a new track. Called by AnalysisWindow on track changes."""
+        prev_time = self._current_session_time
         self._session = build_session(self._source_session, track)
         populate_sectors(self._session)
         self._map.set_session(self._session)
         self._active_lap_idx = 0
         self._rebuild_lap_table()
         self._rebuild_ref_combo()
-        self._update_plot()
-        self._update_map_full()
-        self.jump_to_time(self._session.laps[0].lap_start_time if self._session.laps else 0)
+        self.jump_to_time(prev_time)
 
     def _update_plot(self, *_args):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
