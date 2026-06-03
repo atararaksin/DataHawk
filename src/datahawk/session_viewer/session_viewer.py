@@ -18,7 +18,7 @@ from datahawk.session_utils import get_channel_value_in_another_lap_with_interpo
 from datahawk.session_processing import populate_sectors
 from datahawk.storage import delete_track
 from datahawk.session_viewer.map_widget import MapWidget
-from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
+from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked, LapTableRefClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
 
@@ -27,6 +27,7 @@ class SessionViewer(QWidget):
     """Session viewer tab widget. Emits track_changed when track is mutated."""
 
     track_changed = Signal(object)  # emits Track
+    ref_selected = Signal(object)  # emits Lap (the reference lap object)
 
     def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None):
         super().__init__(parent)
@@ -71,12 +72,6 @@ class SessionViewer(QWidget):
         self._combo = QComboBox()
         self._combo.setMinimumWidth(250)
         top_row.addWidget(self._combo)
-        top_row.addWidget(QLabel("Reference:"))
-        self._ref_combo = QComboBox()
-        self._ref_combo.addItem("None")
-        for i, lap in enumerate(self._session.laps):
-            self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
-        top_row.addWidget(self._ref_combo)
         self._diff_cb = QCheckBox("Diff")
         self._diff_cb.stateChanged.connect(self._update_plot)
         top_row.addWidget(self._diff_cb)
@@ -129,8 +124,10 @@ class SessionViewer(QWidget):
 
         # Connections
         self._combo.currentIndexChanged.connect(self._update_plot)
-        self._ref_combo.currentIndexChanged.connect(self._update_plot)
-        self._ref_combo.currentIndexChanged.connect(self._update_map_full)
+
+        # Reference lap (set externally by AnalysisWindow)
+        self._ref_lap = None
+        self._table.ref_clicked.connect(self._on_ref_clicked)
 
         # Select first lap
         self._active_lap_idx = 0
@@ -144,15 +141,6 @@ class SessionViewer(QWidget):
         if self._initial_video_path and self._initial_video_path.exists():
             self._video.load_video(self._initial_video_path, is_gopro_session=True)
 
-
-    def _rebuild_ref_combo(self):
-        """Rebuild the reference lap dropdown after session reprocessing."""
-        self._ref_combo.blockSignals(True)
-        self._ref_combo.clear()
-        self._ref_combo.addItem("None")
-        for i, lap in enumerate(self._session.laps):
-            self._ref_combo.addItem(f"Lap {i + 1} ({lap.lap_time:.2f}s)")
-        self._ref_combo.blockSignals(False)
 
     def _rebuild_lap_table(self):
         """Rebuild the laps table with current sector columns."""
@@ -202,10 +190,8 @@ class SessionViewer(QWidget):
     def _update_map_full(self):
         """Full map redraw (tiles + trajectories). Call on lap/reference change."""
         current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
-        ref_sel = self._ref_combo.currentIndex() - 1
-        ref_lap = self._session.laps[ref_sel] if 0 <= ref_sel < len(self._session.laps) else None
         self._map.set_track(self._session.track)
-        self._map.set_laps(current_lap, ref_lap)
+        self._map.set_laps(current_lap, self._ref_lap)
 
     def jump_to_lap(self, lap_idx: int):
         """Jump to target lap at the same spatial position as current cursor."""
@@ -261,6 +247,25 @@ class SessionViewer(QWidget):
         """Handle click on the graph to seek to that time."""
         self.jump_to_time(event.session_time)
         self._video.seek_to_session_time(event.session_time)
+
+    def _on_ref_clicked(self, event: LapTableRefClicked):
+        """Handle ref column click — emit the selected lap as reference."""
+        if event.lap_idx < len(self._session.laps):
+            self.ref_selected.emit(self._session.laps[event.lap_idx])
+
+    def set_reference_lap(self, lap):
+        """Set the reference lap (from any session) and refresh display."""
+        self._ref_lap = lap
+        # Highlight matching row in this table if ref belongs to this session
+        ref_row = None
+        if lap is not None:
+            for i, l in enumerate(self._session.laps):
+                if l is lap:
+                    ref_row = i
+                    break
+        self._table.set_ref_row(ref_row)
+        self._update_plot()
+        self._update_map_full()
 
     def _add_sector_split(self):
         """Create a sector split line at the current cursor position."""
@@ -357,18 +362,16 @@ class SessionViewer(QWidget):
         self._map.set_session(self._session)
         self._active_lap_idx = 0
         self._rebuild_lap_table()
-        self._rebuild_ref_combo()
         self.jump_to_time(prev_time)
 
     def _update_plot(self, *_args):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
         ch_name = self._channel_names[self._combo.currentIndex()]
-        ref_sel = self._ref_combo.currentIndex() - 1
         self._graph.update_plot(
             session=self._session,
             lap_idx=self._active_lap_idx,
             channel_name=ch_name,
-            ref_lap_idx=ref_sel if ref_sel >= 0 else None,
+            ref_lap=self._ref_lap,
             diff_mode=self._diff_cb.isChecked(),
         )

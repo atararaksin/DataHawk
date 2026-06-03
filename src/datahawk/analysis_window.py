@@ -21,6 +21,7 @@ class AnalysisWindow(QMainWindow):
         self._tabs.setTabsClosable(True)
         self._tabs.tabCloseRequested.connect(self._close_tab)
         self.setCentralWidget(self._tabs)
+        self._ref_lap = None
 
     @property
     def track_name(self) -> str:
@@ -30,9 +31,13 @@ class AnalysisWindow(QMainWindow):
         """Add a new SessionViewer tab. Returns the viewer."""
         viewer = SessionViewer(source_session, session, video_path=video_path)
         viewer.track_changed.connect(self._on_track_changed)
+        viewer.ref_selected.connect(self._on_ref_selected)
         tab_label = label or f"{session.date} {session.start_time}"
         self._tabs.addTab(viewer, tab_label)
         self._tabs.setCurrentWidget(viewer)
+        # Apply current reference if one is already set
+        if self._ref_lap is not None:
+            viewer.set_reference_lap(self._ref_lap)
         return viewer
 
     def has_session(self, session_id: str) -> bool:
@@ -50,6 +55,13 @@ class AnalysisWindow(QMainWindow):
         for i in range(self._tabs.count()):
             viewer: SessionViewer = self._tabs.widget(i)
             viewer.rebuild_with_track(track)
+
+    def _on_ref_selected(self, lap):
+        """Set reference lap across all tabs."""
+        self._ref_lap = lap
+        for i in range(self._tabs.count()):
+            viewer: SessionViewer = self._tabs.widget(i)
+            viewer.set_reference_lap(lap)
 
     def _close_tab(self, index: int):
         viewer: SessionViewer = self._tabs.widget(index)
