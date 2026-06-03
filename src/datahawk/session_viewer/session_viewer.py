@@ -275,7 +275,6 @@ class SessionViewer(QMainWindow):
         self._rebuild_lap_table()
         self._update_plot()
         self._update_map_full()
-        print(f"Sector split added at t={session_time:.3f}s, lat={lat:.6f}, lon={lon:.6f}, heading={heading:.1f}°")
 
     def _remove_sector_split(self):
         """Remove all sector splits within ±2s of current time."""
