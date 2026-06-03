@@ -73,7 +73,7 @@ def build_session(
             start_time=source_session.metadata.time,
             date=source_session.metadata.date,
             track=track,
-            samples_per_lap=0, reference_lap_index=0,
+            samples_per_lap=0,
             best_lap_index=0, best_lap_time=0.0,
         )
 
@@ -82,7 +82,7 @@ def build_session(
         return Session(
             start_time=source_session.metadata.time, date=source_session.metadata.date,
             track=track,
-            samples_per_lap=0, reference_lap_index=0,
+            samples_per_lap=0,
             best_lap_index=0, best_lap_time=0.0,
         )
 
@@ -106,7 +106,6 @@ def build_session(
         date=source_session.metadata.date,
         track=track,
         samples_per_lap=samples_per_lap,
-        reference_lap_index=fastest_idx,
         best_lap_index=fastest_idx,
         best_lap_time=lap_times[fastest_idx],
     )

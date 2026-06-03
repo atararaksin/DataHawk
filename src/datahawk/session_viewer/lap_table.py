@@ -51,7 +51,7 @@ class LapTable(QTableWidget):
         self.setHorizontalHeaderLabels(headers)
 
         purple = QBrush(QColor(128, 0, 128))
-        best_lap_idx = session.reference_lap_index
+        best_lap_idx = session.best_lap_index
 
         # Find fastest sector times
         best_sectors = [float('inf')] * n_sectors

@@ -78,7 +78,6 @@ class Session:
     date: str
     track: Track
     samples_per_lap: int
-    reference_lap_index: int
     best_lap_index: int
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
