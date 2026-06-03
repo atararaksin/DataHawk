@@ -1,63 +1,30 @@
-"""Track selection dialog for session import."""
+"""Track selection dialog for GoPro session import."""
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QLineEdit, QDialogButtonBox,
-)
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox
 
-from datahawk.storage import list_tracks
-
-_NEW_TRACK = "➕ Add new track..."
+from datahawk.track_selector import TrackSelector
 
 
 class TrackSelectionDialog(QDialog):
-    """Dialog to select an existing track or create a new one."""
+    """Dialog wrapping TrackSelector with OK/Cancel buttons."""
 
-    def __init__(self, parent=None, *, title="Select Track"):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(title)
+        self.setWindowTitle("Select Track")
         layout = QVBoxLayout(self)
 
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Track:"))
-        self._combo = QComboBox()
-        tracks = list_tracks()
-        for t in tracks:
-            self._combo.addItem(t)
-        self._combo.addItem(_NEW_TRACK)
-        self._combo.currentTextChanged.connect(self._on_combo_changed)
-        row.addWidget(self._combo)
-        layout.addLayout(row)
-
-        self._name_row = QHBoxLayout()
-        self._name_row_label = QLabel("Name:")
-        self._name_row.addWidget(self._name_row_label)
-        self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("Track name")
-        self._name_row.addWidget(self._name_input)
-        layout.addLayout(self._name_row)
-
-        # Show/hide name input based on initial selection
-        is_new = self._combo.currentText() == _NEW_TRACK
-        self._name_row_label.setVisible(is_new)
-        self._name_input.setVisible(is_new)
+        self._selector = TrackSelector()
+        layout.addWidget(self._selector)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _on_combo_changed(self, text: str):
-        is_new = text == _NEW_TRACK
-        self._name_row_label.setVisible(is_new)
-        self._name_input.setVisible(is_new)
-
     @property
     def is_new_track(self) -> bool:
-        return self._combo.currentText() == _NEW_TRACK
+        return self._selector.is_new_track
 
     @property
     def track_name(self) -> str:
-        if self.is_new_track:
-            return self._name_input.text().strip()
-        return self._combo.currentText()
+        return self._selector.track_name
