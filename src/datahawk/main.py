@@ -130,9 +130,14 @@ class MainWindow(QMainWindow):
         parsed = parse_xrz(path)
 
         track = load_track(track_name)
+        # TODO: remove after running once locally -- auto-creates track if missing
         if not track:
-            QMessageBox.warning(self, "Error", f"Track '{track_name}' not found in database.")
-            return
+            from datahawk.session_processing import detect_sf_line, detect_master_lap
+            from datahawk.types import Track
+            sf_line = detect_sf_line(parsed)
+            master_lap = detect_master_lap(parsed, sf_line)
+            track = Track(name=track_name, sf_line=sf_line, master_lap=master_lap)
+            save_track(track)
 
         session = build_session(parsed, track)
         viewer = SessionViewer(parsed, session)
