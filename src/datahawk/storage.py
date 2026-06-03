@@ -42,6 +42,8 @@ def _get_db() -> sqlite3.Connection:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    # TODO: remove after running once locally
+    conn.execute("DROP TABLE IF EXISTS tracks")
     conn.executescript(_SCHEMA)
     return conn
 
