@@ -50,9 +50,18 @@ class Lap:
 
 
 @dataclass
+class MasterLap:
+    """Master (fastest) lap GPS coordinates used for spatial reindexing."""
+    lats: list[float]
+    lons: list[float]
+    headings: list[float]
+
+
+@dataclass
 class Track:
     name: str
     sf_line: Line
+    master_lap: MasterLap
     sector_split_lines: list[Line] = field(default_factory=list)
 
 @dataclass
@@ -69,7 +78,6 @@ class Session:
     date: str
     track: Track
     samples_per_lap: int
-    reference_lap_index: int
     best_lap_index: int
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)

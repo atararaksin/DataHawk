@@ -12,11 +12,11 @@ from PySide6.QtGui import QAction
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer
-from datahawk.storage import get_session_file_path
+from datahawk.storage import get_session_file_path, get_session_track_name, load_track, save_track
 
 
 class _GoProDialog(QDialog):
-    """Dialog to collect driver name and track name for GoPro import."""
+    """Dialog to collect driver name and track for GoPro import."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Open GoPro Video")
@@ -29,12 +29,9 @@ class _GoProDialog(QDialog):
         row1.addWidget(self.driver_input)
         layout.addLayout(row1)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Track:"))
-        self.track_input = QLineEdit()
-        self.track_input.setPlaceholderText("Track name")
-        row2.addWidget(self.track_input)
-        layout.addLayout(row2)
+        from datahawk.track_selector import TrackSelector
+        self.track_selector = TrackSelector()
+        layout.addWidget(self.track_selector)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -84,19 +81,33 @@ class MainWindow(QMainWindow):
         dialog = _GoProDialog(self)
         if not dialog.exec():
             return
-
         driver = dialog.driver_input.text().strip() or "Unknown"
-        track = dialog.track_input.text().strip() or "Unknown"
+        track_name = dialog.track_selector.track_name
+        if not track_name:
+            QMessageBox.warning(self, "Error", "Track name cannot be empty.")
+            return
 
         try:
             from datahawk.source.gopro.gopro_parser import parse_gopro
+            from datahawk.session_processing import build_session, detect_sf_line, detect_master_lap
+            from datahawk.types import Track
 
             parsed, _timo = parse_gopro(path)
-            parsed.metadata.track = track
+
+            if dialog.track_selector.is_new_track:
+                sf_line = detect_sf_line(parsed)
+                master_lap = detect_master_lap(parsed, sf_line)
+                track = Track(name=track_name, sf_line=sf_line, master_lap=master_lap)
+                save_track(track)
+            else:
+                track = load_track(track_name)
+
+            parsed.metadata.track = track.name
             parsed.metadata.date = ""
 
-            viewer = SessionViewer(parsed, video_path=Path(path))
-            viewer.setWindowTitle(f"DataHawk — {track} ({driver}) [GoPro]")
+            session = build_session(parsed, track)
+            viewer = SessionViewer(parsed, session, video_path=Path(path))
+            viewer.setWindowTitle(f"DataHawk — {track.name} ({driver}) [GoPro]")
             viewer.show()
             self._viewers.append(viewer)
         except Exception as e:
@@ -107,12 +118,26 @@ class MainWindow(QMainWindow):
         if not path or not path.exists():
             QMessageBox.warning(self, "Error", "Session file not found.")
             return
+
+        track_name = get_session_track_name(session_id)
+        if not track_name:
+            QMessageBox.warning(self, "Error", "Session has no track assigned.")
+            return
+
         from datahawk.source.mychron.xrz_parser import parse_xrz
+        from datahawk.session_processing import build_session
+
         parsed = parse_xrz(path)
-        viewer = SessionViewer(parsed)
+
+        track = load_track(track_name)
+        if not track:
+            QMessageBox.warning(self, "Error", f"Track '{track_name}' not found in database.")
+            return
+
+        session = build_session(parsed, track)
+        viewer = SessionViewer(parsed, session)
         viewer.show()
         self._viewers.append(viewer)
-
 
 def main():
     app = QApplication(sys.argv)

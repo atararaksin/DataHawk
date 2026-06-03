@@ -11,7 +11,7 @@ from datahawk.session_utils import get_channel_value_in_another_lap_with_interpo
 
 
 def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
-    """Detect times at which the reference lap crosses each sector split line.
+    """Detect times at which the master lap crosses each sector split line.
 
     Returns crossing times ordered by time of crossing.
     Also reorders session.track.sector_split_lines to match chronological order.
@@ -21,17 +21,15 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
     if not split_lines:
         return []
 
-    ref_lap = session.laps[session.reference_lap_index]
-    lat_ch = ref_lap.gps_lat
-    lon_ch = ref_lap.gps_lon
+    master_lap = session.track.master_lap
+    lats = master_lap.lats
+    lons = master_lap.lons
+
+    # Use reference lap's Master Clk for time interpolation
+    ref_lap = session.laps[session.best_lap_index]
     mc_ch = ref_lap.master_clk
-
-    if not (lat_ch and lon_ch and mc_ch):
+    if not mc_ch:
         return []
-
-    # Use reindexed data (same sample count across channels)
-    lats = lat_ch.samples
-    lons = lon_ch.samples
     mcs = mc_ch.samples
 
     # Pair each line with its crossing time
@@ -46,7 +44,7 @@ def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
                 continue
             pt = intersection(line, lats[i], lons[i], lats[i + 1], lons[i + 1])
             if pt is not None:
-                if math.isnan(mcs[i]) or math.isnan(mcs[i + 1]):
+                if i >= len(mcs) - 1 or math.isnan(mcs[i]) or math.isnan(mcs[i + 1]):
                     continue
                 # Interpolate Master Clk at crossing point
                 t = interpolate_by_gps(
