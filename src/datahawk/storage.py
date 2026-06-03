@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS tracks (
     name TEXT PRIMARY KEY,
     sector_split_lines TEXT NOT NULL DEFAULT '[]',
-    sf_line TEXT
+    sf_line TEXT,
+    master_lap_lats TEXT,
+    master_lap_lons TEXT
 );
 """
 
@@ -41,11 +43,10 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Add sf_line column if missing (existing DBs)
-    try:
-        conn.execute("ALTER TABLE tracks ADD COLUMN sf_line TEXT")
-    except sqlite3.OperationalError:
-        pass
+    # Migration: wipe tracks table (schema changed, single user)
+    # TODO: remove this after running once locally
+    conn.execute("DELETE FROM tracks")
+    conn.commit()
     return conn
 
 
@@ -171,3 +172,51 @@ def delete_track(track_name: str) -> None:
     db.execute("DELETE FROM tracks WHERE name = ?", (track_name,))
     db.commit()
     db.close()
+
+
+def save_track(track) -> None:
+    """Save a complete Track object to the database."""
+    from datahawk.types import Line
+    sectors_data = [[l.a.lat, l.a.lon, l.b.lat, l.b.lon] for l in track.sector_split_lines]
+    sf_data = [track.sf_line.a.lat, track.sf_line.a.lon, track.sf_line.b.lat, track.sf_line.b.lon]
+    db = _get_db()
+    db.execute(
+        """INSERT INTO tracks (name, sector_split_lines, sf_line, master_lap_lats, master_lap_lons)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(name) DO UPDATE SET
+             sector_split_lines = ?, sf_line = ?, master_lap_lats = ?, master_lap_lons = ?""",
+        (track.name, json.dumps(sectors_data), json.dumps(sf_data),
+         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons),
+         json.dumps(sectors_data), json.dumps(sf_data),
+         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons)),
+    )
+    db.commit()
+    db.close()
+
+
+def load_track(track_name: str):
+    """Load a complete Track from the database. Returns Track or None."""
+    from datahawk.types import Track, Line, Point, MasterLap
+    db = _get_db()
+    row = db.execute("SELECT * FROM tracks WHERE name = ?", (track_name,)).fetchone()
+    db.close()
+    if not row or not row["sf_line"] or not row["master_lap_lats"]:
+        return None
+    sf = json.loads(row["sf_line"])
+    sectors_data = json.loads(row["sector_split_lines"])
+    lats = json.loads(row["master_lap_lats"])
+    lons = json.loads(row["master_lap_lons"])
+    return Track(
+        name=track_name,
+        sf_line=Line(Point(sf[0], sf[1]), Point(sf[2], sf[3])),
+        master_lap=MasterLap(lats=lats, lons=lons),
+        sector_split_lines=[Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in sectors_data],
+    )
+
+
+def list_tracks() -> list[str]:
+    """Return all saved track names."""
+    db = _get_db()
+    rows = db.execute("SELECT name FROM tracks ORDER BY name").fetchall()
+    db.close()
+    return [r["name"] for r in rows]

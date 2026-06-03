@@ -10,7 +10,7 @@ from datahawk.source.types import SourceSession
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, MASTER_CLK, BEACON
 from datahawk.session_processing.lap_detection import detect_sf_from_mychron_beacon, detect_laps, detect_sf_from_max_speed
 from datahawk.session_processing.synthetic_channels import add_lap_level_synthetic_channels
-from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track, Line
+from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track, Line, MasterLap
 
 
 def detect_sf_line(source_session: SourceSession) -> Line:
@@ -25,11 +25,8 @@ def detect_sf_line(source_session: SourceSession) -> Line:
         return detect_sf_from_max_speed(source_session)
 
 
-def detect_master_lap(source_session: SourceSession, sf_line: Line) -> tuple[list[float], list[float]]:
-    """Detect the master (fastest) lap and return its GPS coordinates.
-
-    Returns (master_lap_lats, master_lap_lons).
-    """
+def detect_master_lap(source_session: SourceSession, sf_line: Line) -> MasterLap:
+    """Detect the master (fastest) lap and return its GPS coordinates."""
     boundaries = detect_laps(source_session, sf_line)
 
     lat_ch = source_session.channels.get(GPS_LATITUDE)
@@ -52,27 +49,28 @@ def detect_master_lap(source_session: SourceSession, sf_line: Line) -> tuple[lis
     master_lap_lats = [lat_ch.values[i] for i in ref_indices]
     master_lap_lons = [lon_ch.values[i] for i in ref_indices]
 
-    return master_lap_lats, master_lap_lons
+    return MasterLap(lats=master_lap_lats, lons=master_lap_lons)
 
 
 def build_session(
     source_session: SourceSession,
-    sf_line: Line,
-    master_lap_lats: list[float],
-    master_lap_lons: list[float],
+    track: Track,
 ) -> Session:
     """Build a Session by reindexing all laps against the master lap trajectory."""
 
-    boundaries = detect_laps(source_session, sf_line)
+    boundaries = detect_laps(source_session, track.sf_line)
 
     lat_ch = source_session.channels.get(GPS_LATITUDE)
     lon_ch = source_session.channels.get(GPS_LONGITUDE)
+
+    master_lap_lats = track.master_lap.lats
+    master_lap_lons = track.master_lap.lons
 
     if len(boundaries) < 4 or not lat_ch or not lon_ch:
         return Session(
             start_time=source_session.metadata.time,
             date=source_session.metadata.date,
-            track=Track(name=source_session.metadata.track, sf_line=sf_line),
+            track=track,
             samples_per_lap=0, reference_lap_index=0,
             best_lap_index=0, best_lap_time=0.0,
         )
@@ -81,7 +79,7 @@ def build_session(
     if samples_per_lap < 10:
         return Session(
             start_time=source_session.metadata.time, date=source_session.metadata.date,
-            track=Track(name=source_session.metadata.track, sf_line=sf_line),
+            track=track,
             samples_per_lap=0, reference_lap_index=0,
             best_lap_index=0, best_lap_time=0.0,
         )
@@ -104,7 +102,7 @@ def build_session(
     session = Session(
         start_time=source_session.metadata.time,
         date=source_session.metadata.date,
-        track=Track(name=source_session.metadata.track, sf_line=sf_line),
+        track=track,
         samples_per_lap=samples_per_lap,
         reference_lap_index=fastest_idx,
         best_lap_index=fastest_idx,
@@ -176,26 +174,6 @@ def build_session(
     session.temporal_index = _build_temporal_index(session)
 
     return session
-
-
-def process_session(parsed: SourceSession, sf_line_override=None) -> Session:
-    """Process a parsed session into position-indexed laps.
-
-    Convenience function that detects SF line and master lap, then builds the session.
-    """
-    sf_line = sf_line_override if sf_line_override is not None else detect_sf_line(parsed)
-
-    try:
-        master_lap_lats, master_lap_lons = detect_master_lap(parsed, sf_line)
-    except (ValueError, IndexError):
-        return Session(
-            start_time=parsed.metadata.time, date=parsed.metadata.date,
-            track=Track(name=parsed.metadata.track, sf_line=sf_line),
-            samples_per_lap=0, reference_lap_index=0,
-            best_lap_index=0, best_lap_time=0.0,
-        )
-
-    return build_session(parsed, sf_line, master_lap_lats, master_lap_lons)
 
 
 def _find_nearest_points(
