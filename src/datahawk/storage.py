@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     sector_split_lines TEXT NOT NULL DEFAULT '[]',
     sf_line TEXT,
     master_lap_lats TEXT,
-    master_lap_lons TEXT
+    master_lap_lons TEXT,
+    master_lap_headings TEXT
 );
 """
 
@@ -42,6 +43,8 @@ def _get_db() -> sqlite3.Connection:
     SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    # TODO: remove after running once locally
+    conn.execute("DROP TABLE IF EXISTS tracks")
     conn.executescript(_SCHEMA)
     return conn
 
@@ -138,14 +141,14 @@ def save_track(track) -> None:
     sf_data = [track.sf_line.a.lat, track.sf_line.a.lon, track.sf_line.b.lat, track.sf_line.b.lon]
     db = _get_db()
     db.execute(
-        """INSERT INTO tracks (name, sector_split_lines, sf_line, master_lap_lats, master_lap_lons)
-           VALUES (?, ?, ?, ?, ?)
+        """INSERT INTO tracks (name, sector_split_lines, sf_line, master_lap_lats, master_lap_lons, master_lap_headings)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(name) DO UPDATE SET
-             sector_split_lines = ?, sf_line = ?, master_lap_lats = ?, master_lap_lons = ?""",
+             sector_split_lines = ?, sf_line = ?, master_lap_lats = ?, master_lap_lons = ?, master_lap_headings = ?""",
         (track.name, json.dumps(sectors_data), json.dumps(sf_data),
-         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons),
+         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons), json.dumps(track.master_lap.headings),
          json.dumps(sectors_data), json.dumps(sf_data),
-         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons)),
+         json.dumps(track.master_lap.lats), json.dumps(track.master_lap.lons), json.dumps(track.master_lap.headings)),
     )
     db.commit()
     db.close()
@@ -163,10 +166,11 @@ def load_track(track_name: str):
     sectors_data = json.loads(row["sector_split_lines"])
     lats = json.loads(row["master_lap_lats"])
     lons = json.loads(row["master_lap_lons"])
+    headings = json.loads(row["master_lap_headings"]) if row["master_lap_headings"] else [0.0] * len(lats)
     return Track(
         name=track_name,
         sf_line=Line(Point(sf[0], sf[1]), Point(sf[2], sf[3])),
-        master_lap=MasterLap(lats=lats, lons=lons),
+        master_lap=MasterLap(lats=lats, lons=lons, headings=headings),
         sector_split_lines=[Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in sectors_data],
     )
 

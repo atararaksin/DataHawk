@@ -54,6 +54,7 @@ class MasterLap:
     """Master (fastest) lap GPS coordinates used for spatial reindexing."""
     lats: list[float]
     lons: list[float]
+    headings: list[float]
 
 
 @dataclass

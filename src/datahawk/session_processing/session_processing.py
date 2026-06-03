@@ -7,7 +7,7 @@ from bisect import bisect_left, bisect_right
 from typing import Optional
 
 from datahawk.source.types import SourceSession
-from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, MASTER_CLK, BEACON
+from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING, MASTER_CLK, BEACON
 from datahawk.session_processing.lap_detection import detect_sf_from_mychron_beacon, detect_laps, detect_sf_from_max_speed
 from datahawk.session_processing.synthetic_channels import add_lap_level_synthetic_channels
 from datahawk.types import Channel, Lap, TemporalIndexEntry, Session, Track, Line, MasterLap
@@ -31,8 +31,9 @@ def detect_master_lap(source_session: SourceSession, sf_line: Line) -> MasterLap
 
     lat_ch = source_session.channels.get(GPS_LATITUDE)
     lon_ch = source_session.channels.get(GPS_LONGITUDE)
+    heading_ch = source_session.channels.get(GPS_HEADING)
 
-    if len(boundaries) < 4 or not lat_ch or not lon_ch:
+    if len(boundaries) < 4 or not lat_ch or not lon_ch or not heading_ch:
         raise ValueError("Not enough laps or GPS data to detect master lap")
 
     lap_times = [boundaries[i + 1] - boundaries[i] for i in range(len(boundaries) - 1)]
@@ -48,8 +49,9 @@ def detect_master_lap(source_session: SourceSession, sf_line: Line) -> MasterLap
     ref_indices = [i for i, t in enumerate(gps_times) if ref_start <= t < ref_end]
     master_lap_lats = [lat_ch.values[i] for i in ref_indices]
     master_lap_lons = [lon_ch.values[i] for i in ref_indices]
+    master_lap_headings = [heading_ch.values[i] for i in ref_indices]
 
-    return MasterLap(lats=master_lap_lats, lons=master_lap_lons)
+    return MasterLap(lats=master_lap_lats, lons=master_lap_lons, headings=master_lap_headings)
 
 
 def build_session(
