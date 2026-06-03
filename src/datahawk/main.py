@@ -13,11 +13,10 @@ from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer
 from datahawk.storage import get_session_file_path, get_session_track_name, load_track, save_track
-from datahawk.track_selection_dialog import TrackSelectionDialog
 
 
 class _GoProDialog(QDialog):
-    """Dialog to collect driver name for GoPro import."""
+    """Dialog to collect driver name and track for GoPro import."""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Open GoPro Video")
@@ -29,6 +28,10 @@ class _GoProDialog(QDialog):
         self.driver_input.setPlaceholderText("Driver name")
         row1.addWidget(self.driver_input)
         layout.addLayout(row1)
+
+        from datahawk.track_selector import TrackSelector
+        self.track_selector = TrackSelector()
+        layout.addWidget(self.track_selector)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -79,16 +82,26 @@ class MainWindow(QMainWindow):
         if not dialog.exec():
             return
         driver = dialog.driver_input.text().strip() or "Unknown"
-
-        track = self._select_or_create_track(path)
-        if track is None:
+        track_name = dialog.track_selector.track_name
+        if not track_name:
+            QMessageBox.warning(self, "Error", "Track name cannot be empty.")
             return
 
         try:
             from datahawk.source.gopro.gopro_parser import parse_gopro
-            from datahawk.session_processing import build_session
+            from datahawk.session_processing import build_session, detect_sf_line, detect_master_lap
+            from datahawk.types import Track
 
             parsed, _timo = parse_gopro(path)
+
+            if dialog.track_selector.is_new_track:
+                sf_line = detect_sf_line(parsed)
+                master_lap = detect_master_lap(parsed, sf_line)
+                track = Track(name=track_name, sf_line=sf_line, master_lap=master_lap)
+                save_track(track)
+            else:
+                track = load_track(track_name)
+
             parsed.metadata.track = track.name
             parsed.metadata.date = ""
 
@@ -124,37 +137,6 @@ class MainWindow(QMainWindow):
         viewer = SessionViewer(parsed, session)
         viewer.show()
         self._viewers.append(viewer)
-
-    def _select_or_create_track(self, file_path: str):
-        """Show track selection dialog for GoPro. If new track, detect SF + master lap and save."""
-        from datahawk.session_processing import detect_sf_line, detect_master_lap
-        from datahawk.types import Track
-
-        dialog = TrackSelectionDialog(self)
-        if not dialog.exec():
-            return None
-
-        track_name = dialog.track_name
-        if not track_name:
-            QMessageBox.warning(self, "Error", "Track name cannot be empty.")
-            return None
-
-        if not dialog.is_new_track:
-            return load_track(track_name)
-
-        # New track: parse and detect
-        try:
-            from datahawk.source.gopro.gopro_parser import parse_gopro
-            parsed, _ = parse_gopro(file_path)
-            sf_line = detect_sf_line(parsed)
-            master_lap = detect_master_lap(parsed, sf_line)
-            track = Track(name=track_name, sf_line=sf_line, master_lap=master_lap)
-            save_track(track)
-            return track
-        except Exception as e:
-            QMessageBox.warning(self, "Error", f"Failed to create track:\n{e}")
-            return None
-
 
 def main():
     app = QApplication(sys.argv)
