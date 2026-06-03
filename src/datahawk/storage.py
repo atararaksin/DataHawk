@@ -43,10 +43,6 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Migration: wipe tracks table (schema changed, single user)
-    # TODO: remove this after running once locally
-    conn.execute("DELETE FROM tracks")
-    conn.commit()
     return conn
 
 
