@@ -20,7 +20,7 @@ from datahawk.utils.gps_utils import create_perpendecular_line
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_sector_split_line_at_time, get_lap_idx_by_session_time
 from datahawk.constants import CROSSING_LINE_LENGTH
 from datahawk.session_processing import populate_sectors
-from datahawk.storage import save_track_sectors, load_track_sectors, delete_track, save_track
+from datahawk.storage import delete_track, save_track, load_track
 from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
@@ -32,10 +32,6 @@ class SessionViewer(QMainWindow):
         super().__init__(parent)
         self._source_session = source_session
         self._session = session
-        # Load saved sectors for this track
-        saved_sectors = load_track_sectors(self._session.track.name)
-        if saved_sectors is not None:
-            self._session.track.sector_split_lines = saved_sectors
         populate_sectors(self._session)
         self._initial_video_path = video_path  # for GoPro sessions
 
@@ -278,7 +274,7 @@ class SessionViewer(QMainWindow):
 
         self._session.track.sector_split_lines.append(split_line)
         populate_sectors(self._session)
-        save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
+        save_track(self._session.track)
         self._rebuild_lap_table()
         self._update_plot()
         self._update_map_full()
@@ -300,7 +296,7 @@ class SessionViewer(QMainWindow):
         for i in reversed(to_remove):
             del self._session.track.sector_split_lines[i]
         populate_sectors(self._session)
-        save_track_sectors(self._session.track.name, self._session.track.sector_split_lines)
+        save_track(self._session.track)
         self._rebuild_lap_table()
         self._update_plot()
         self._update_map_full()
@@ -356,10 +352,6 @@ class SessionViewer(QMainWindow):
         # Re-process with new track
         self._session = build_session(self._source_session, track)
 
-        # Reload saved sectors
-        saved_sectors = load_track_sectors(self._session.track.name)
-        if saved_sectors is not None:
-            self._session.track.sector_split_lines = saved_sectors
         populate_sectors(self._session)
 
         # Rebuild UI

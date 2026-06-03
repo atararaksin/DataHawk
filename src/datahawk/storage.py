@@ -113,53 +113,14 @@ def get_session_file_path(session_id: str) -> Path | None:
     return None
 
 
-def save_track_sectors(track_name: str, sector_split_lines: list) -> None:
-    """Save sector split line coordinates for a track."""
-    from datahawk.types import Line
-    data = [[l.a.lat, l.a.lon, l.b.lat, l.b.lon] for l in sector_split_lines]
+def get_session_track_name(session_id: str) -> str | None:
+    """Return track name for a session."""
     db = _get_db()
-    db.execute(
-        "INSERT INTO tracks (name, sector_split_lines) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET sector_split_lines = ?",
-        (track_name, json.dumps(data), json.dumps(data)),
-    )
-    db.commit()
+    row = db.execute("SELECT track FROM sessions WHERE id = ?", (session_id,)).fetchone()
     db.close()
-
-
-def load_track_sectors(track_name: str) -> list | None:
-    """Load saved sector split lines for a track. Returns list of Line or None."""
-    from datahawk.types import Line, Point
-    db = _get_db()
-    row = db.execute("SELECT sector_split_lines FROM tracks WHERE name = ?", (track_name,)).fetchone()
-    db.close()
-    if not row:
-        return None
-    data = json.loads(row["sector_split_lines"])
-    return [Line(Point(c[0], c[1]), Point(c[2], c[3])) for c in data]
-
-
-def save_track_sf_line(track_name: str, sf_line) -> None:
-    """Save a custom SF line for a track."""
-    data = [sf_line.a.lat, sf_line.a.lon, sf_line.b.lat, sf_line.b.lon]
-    db = _get_db()
-    db.execute(
-        "INSERT INTO tracks (name, sf_line) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET sf_line = ?",
-        (track_name, json.dumps(data), json.dumps(data)),
-    )
-    db.commit()
-    db.close()
-
-
-def load_track_sf_line(track_name: str):
-    """Load saved SF line for a track. Returns Line or None."""
-    from datahawk.types import Line, Point
-    db = _get_db()
-    row = db.execute("SELECT sf_line FROM tracks WHERE name = ?", (track_name,)).fetchone()
-    db.close()
-    if not row or not row["sf_line"]:
-        return None
-    c = json.loads(row["sf_line"])
-    return Line(Point(c[0], c[1]), Point(c[2], c[3]))
+    if row:
+        return row["track"] or None
+    return None
 
 
 def delete_track(track_name: str) -> None:

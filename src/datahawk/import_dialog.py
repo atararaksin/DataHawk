@@ -4,11 +4,11 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QProgressBar, QLineEdit,
+    QProgressBar, QLineEdit, QComboBox,
 )
 
 from datahawk.source.mychron.mychron import check_device, list_sessions, download_session, Session
-from datahawk.storage import save_session, get_imported_filenames
+from datahawk.storage import save_session, get_imported_filenames, load_track, save_track, list_tracks
 from datahawk.source.mychron.xrz_parser import parse_xrz
 
 
@@ -31,18 +31,38 @@ class _DownloadWorker(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, sessions: list[Session], driver: str):
+    def __init__(self, sessions: list[Session], driver: str, track_name: str):
         super().__init__()
         self._sessions = sessions
         self._driver = driver
+        self._track_name = track_name
 
     def run(self):
         try:
             count = 0
+            track_created = False
             for i, s in enumerate(self._sessions):
                 self.progress.emit(i + 1, len(self._sessions))
                 data = download_session(s.name, expected_size=s.size)
                 if data and len(data) > 200:
+                    # Create track from first session if it doesn't exist yet
+                    if not track_created and not load_track(self._track_name):
+                        try:
+                            import tempfile
+                            from pathlib import Path
+                            from datahawk.session_processing import detect_sf_line, detect_master_lap
+                            from datahawk.types import Track
+                            tmp = Path(tempfile.mktemp(suffix='.xrz'))
+                            tmp.write_bytes(data)
+                            parsed = parse_xrz(tmp)
+                            sf_line = detect_sf_line(parsed)
+                            master_lap = detect_master_lap(parsed, sf_line)
+                            save_track(Track(name=self._track_name, sf_line=sf_line, master_lap=master_lap))
+                            tmp.unlink()
+                        except Exception:
+                            pass
+                    track_created = True
+
                     save_session(
                         driver=self._driver,
                         original_filename=s.name,
@@ -50,7 +70,7 @@ class _DownloadWorker(QThread):
                         date=s.date,
                         time=s.time,
                         laps=s.laps,
-                        track=s.track,
+                        track=self._track_name,
                         best_lap_time=None,
                     )
                     count += 1
@@ -76,6 +96,22 @@ class ImportDialog(QDialog):
         self._driver_input.setPlaceholderText("Enter driver name")
         driver_row.addWidget(self._driver_input)
         layout.addLayout(driver_row)
+
+        # Track selection
+        track_row = QHBoxLayout()
+        track_row.addWidget(QLabel("Track:"))
+        self._track_combo = QComboBox()
+        tracks = list_tracks()
+        for t in tracks:
+            self._track_combo.addItem(t)
+        self._track_combo.addItem("➕ Add new track...")
+        self._track_combo.currentTextChanged.connect(self._on_track_changed)
+        track_row.addWidget(self._track_combo)
+        self._track_name_input = QLineEdit()
+        self._track_name_input.setPlaceholderText("Track name")
+        self._track_name_input.setVisible(self._track_combo.currentText() == "➕ Add new track...")
+        track_row.addWidget(self._track_name_input)
+        layout.addLayout(track_row)
 
         # Status bar
         status_row = QHBoxLayout()
@@ -114,15 +150,27 @@ class ImportDialog(QDialog):
 
         self._table.itemSelectionChanged.connect(self._update_import_btn)
         self._driver_input.textChanged.connect(self._update_import_btn)
+        self._track_name_input.textChanged.connect(self._update_import_btn)
 
         self._worker = None
         self._dl_worker = None
         self._load_sessions()
 
+    def _on_track_changed(self, text: str):
+        is_new = text == "➕ Add new track..."
+        self._track_name_input.setVisible(is_new)
+        self._update_import_btn()
+
+    def _get_track_name(self) -> str:
+        if self._track_combo.currentText() == "➕ Add new track...":
+            return self._track_name_input.text().strip()
+        return self._track_combo.currentText()
+
     def _update_import_btn(self):
         has_selection = len(self._table.selectedItems()) > 0
         has_driver = bool(self._driver_input.text().strip())
-        self._import_btn.setEnabled(has_selection and has_driver)
+        has_track = bool(self._get_track_name())
+        self._import_btn.setEnabled(has_selection and has_driver and has_track)
 
     def _load_sessions(self):
         self._status.setText("Connecting to device...")
@@ -177,7 +225,7 @@ class ImportDialog(QDialog):
         self._progress.show()
         self._status.setText("Downloading...")
 
-        self._dl_worker = _DownloadWorker(selected, driver)
+        self._dl_worker = _DownloadWorker(selected, driver, self._get_track_name())
         self._dl_worker.progress.connect(self._on_dl_progress)
         self._dl_worker.finished.connect(self._on_dl_done)
         self._dl_worker.error.connect(self._on_dl_error)

@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer
-from datahawk.storage import get_session_file_path, load_track, save_track
+from datahawk.storage import get_session_file_path, get_session_track_name, load_track, save_track
 from datahawk.track_selection_dialog import TrackSelectionDialog
 
 
@@ -80,7 +80,7 @@ class MainWindow(QMainWindow):
             return
         driver = dialog.driver_input.text().strip() or "Unknown"
 
-        track = self._select_or_create_track(path, is_gopro=True)
+        track = self._select_or_create_track(path)
         if track is None:
             return
 
@@ -106,22 +106,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "Session file not found.")
             return
 
-        track = self._select_or_create_track(str(path), is_gopro=False)
-        if track is None:
+        track_name = get_session_track_name(session_id)
+        if not track_name:
+            QMessageBox.warning(self, "Error", "Session has no track assigned.")
+            return
+
+        track = load_track(track_name)
+        if not track:
+            QMessageBox.warning(self, "Error", f"Track '{track_name}' not found in database.")
             return
 
         from datahawk.source.mychron.xrz_parser import parse_xrz
         from datahawk.session_processing import build_session
 
         parsed = parse_xrz(path)
-        parsed.metadata.track = track.name
         session = build_session(parsed, track)
         viewer = SessionViewer(parsed, session)
         viewer.show()
         self._viewers.append(viewer)
 
-    def _select_or_create_track(self, file_path: str, is_gopro: bool):
-        """Show track selection dialog. If new track, detect SF + master lap and save."""
+    def _select_or_create_track(self, file_path: str):
+        """Show track selection dialog for GoPro. If new track, detect SF + master lap and save."""
         from datahawk.session_processing import detect_sf_line, detect_master_lap
         from datahawk.types import Track
 
@@ -139,13 +144,8 @@ class MainWindow(QMainWindow):
 
         # New track: parse and detect
         try:
-            if is_gopro:
-                from datahawk.source.gopro.gopro_parser import parse_gopro
-                parsed, _ = parse_gopro(file_path)
-            else:
-                from datahawk.source.mychron.xrz_parser import parse_xrz
-                parsed = parse_xrz(file_path)
-
+            from datahawk.source.gopro.gopro_parser import parse_gopro
+            parsed, _ = parse_gopro(file_path)
             sf_line = detect_sf_line(parsed)
             master_lap = detect_master_lap(parsed, sf_line)
             track = Track(name=track_name, sf_line=sf_line, master_lap=master_lap)
