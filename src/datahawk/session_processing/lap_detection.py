@@ -100,9 +100,9 @@ def detect_sf_from_max_speed(session: SourceSession) -> Line:
 
 
 def detect_laps(session: SourceSession, sf_line: Line) -> list[float]:
-    """Detect lap boundary times by finding GPS crossings of the S/F line.
+    """Detect lap boundaries by finding GPS crossings of the S/F line.
 
-    Returns list of crossing times (Master Clk values at each S/F crossing).
+    Returns full boundary list: [session_start, crossing1, crossing2, ..., session_end].
     """
     lat_ch = session.gps_lat
     lon_ch = session.gps_lon
@@ -133,4 +133,13 @@ def detect_laps(session: SourceSession, sf_line: Line) -> list[float]:
             crossings.append(crossing_time)
             last_crossing_time = t
 
-    return crossings
+    if not crossings:
+        return []
+
+    # Build full boundary list: session_start, crossings..., session_end
+    from datahawk.source.channel_constants import MASTER_CLK as _MCLK
+    mclk = session.channels.get(_MCLK)
+    session_start_time = mclk.timestamps[0] if mclk and mclk.timestamps else crossings[0]
+    session_end_time = mclk.timestamps[-1] if mclk and mclk.timestamps else crossings[-1]
+
+    return [session_start_time] + crossings + [session_end_time]
