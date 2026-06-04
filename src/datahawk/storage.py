@@ -37,11 +37,6 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 """
 
-_MIGRATION = """
--- Temporary migration: rename original_filename -> filename (remove after first run)
-ALTER TABLE sessions RENAME COLUMN original_filename TO filename;
-"""
-
 
 def _get_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,12 +44,6 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Temporary migration: rename original_filename -> filename
-    try:
-        conn.execute(_MIGRATION)
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass  # Already migrated or column doesn't exist
     return conn
 
 
