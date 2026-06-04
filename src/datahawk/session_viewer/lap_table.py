@@ -75,28 +75,32 @@ class LapTable(QTableWidget):
                 self.setItem(i, 2 + s, item)
 
         self.resizeColumnsToContents()
-        self._apply_ref_highlight()
+        # Re-apply ref highlight after rebuild
+        if self._ref_row is not None and self._ref_row < self.rowCount():
+            bg = QBrush(QColor(80, 0, 0))
+            for c in range(self.columnCount()):
+                item = self.item(self._ref_row, c)
+                if item:
+                    item.setBackground(bg)
         self.blockSignals(False)
 
     def set_ref_row(self, row: int | None):
-        """Set which row is the reference lap (red highlight)."""
+        """Set which row is the reference lap (background highlight)."""
+        old = self._ref_row
         self._ref_row = row
-        self._apply_ref_highlight()
-
-    def _apply_ref_highlight(self):
-        """Apply red foreground on ref row, clear others."""
-        red = QBrush(QColor(255, 80, 80))
-        for i in range(self.rowCount()):
+        # Clear old row background
+        if old is not None:
             for c in range(self.columnCount()):
-                item = self.item(i, c)
+                item = self.item(old, c)
                 if item:
-                    if i == self._ref_row:
-                        item.setForeground(red)
-                    else:
-                        # Don't override purple highlights
-                        pass
-        # Re-apply purple on best lap/sectors after ref highlight
-        # (rebuild already set those, just ensure ref row gets red)
+                    item.setData(Qt.BackgroundRole, None)
+        # Set new row background
+        if row is not None:
+            bg = QBrush(QColor(80, 0, 0))
+            for c in range(self.columnCount()):
+                item = self.item(row, c)
+                if item:
+                    item.setBackground(bg)
 
     def select_sector(self, lap_idx: int, sector_idx: int):
         """Highlight the given sector cell for a lap."""
