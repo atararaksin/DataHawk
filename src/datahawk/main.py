@@ -4,8 +4,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMessageBox,
-    QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QDialogButtonBox,
+    QFileDialog, QDialog, QVBoxLayout, QDialogButtonBox,
 )
 from PySide6.QtGui import QAction
 
@@ -16,18 +15,15 @@ from datahawk.storage import get_session_file_path, get_session_track_name, get_
 
 
 class _GoProDialog(QDialog):
-    """Dialog to collect driver name and track for GoPro import."""
+    """Dialog to collect driver name and track for video import."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Open GoPro Video")
+        self.setWindowTitle("Import from Video")
         layout = QVBoxLayout(self)
 
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Driver:"))
-        self.driver_input = QLineEdit()
-        self.driver_input.setPlaceholderText("Driver name")
-        row1.addWidget(self.driver_input)
-        layout.addLayout(row1)
+        from datahawk.driver_selector import DriverSelector
+        self.driver_selector = DriverSelector()
+        layout.addWidget(self.driver_selector)
 
         from datahawk.track_selector import TrackSelector
         self.track_selector = TrackSelector()
@@ -79,10 +75,9 @@ class MainWindow(QMainWindow):
             return
 
         dialog = _GoProDialog(self)
-        dialog.setWindowTitle("Import from Video")
         if not dialog.exec():
             return
-        driver = dialog.driver_input.text().strip() or "Unknown"
+        driver = dialog.driver_selector.driver_name or "Unknown"
         track_name = dialog.track_selector.track_name
         if not track_name:
             QMessageBox.warning(self, "Error", "Track name cannot be empty.")

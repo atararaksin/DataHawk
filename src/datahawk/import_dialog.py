@@ -4,13 +4,14 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QProgressBar, QLineEdit,
+    QProgressBar,
 )
 
 from datahawk.source.mychron.mychron import check_device, list_sessions, download_session, Session
 from datahawk.storage import save_session, get_imported_filenames, load_track, save_track
 from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.track_selector import TrackSelector
+from datahawk.driver_selector import DriverSelector
 
 
 class _ListWorker(QThread):
@@ -91,13 +92,10 @@ class ImportDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Driver name input
-        driver_row = QHBoxLayout()
-        driver_row.addWidget(QLabel("Driver:"))
-        self._driver_input = QLineEdit()
-        self._driver_input.setPlaceholderText("Enter driver name")
-        driver_row.addWidget(self._driver_input)
-        layout.addLayout(driver_row)
+        # Driver selection
+        self._driver_selector = DriverSelector()
+        self._driver_selector.changed.connect(self._update_import_btn)
+        layout.addWidget(self._driver_selector)
 
         # Track selection
         self._track_selector = TrackSelector()
@@ -140,7 +138,6 @@ class ImportDialog(QDialog):
         layout.addLayout(btn_row)
 
         self._table.itemSelectionChanged.connect(self._update_import_btn)
-        self._driver_input.textChanged.connect(self._update_import_btn)
 
         self._worker = None
         self._dl_worker = None
@@ -148,7 +145,7 @@ class ImportDialog(QDialog):
 
     def _update_import_btn(self):
         has_selection = len(self._table.selectedItems()) > 0
-        has_driver = bool(self._driver_input.text().strip())
+        has_driver = bool(self._driver_selector.driver_name)
         has_track = bool(self._track_selector.track_name)
         self._import_btn.setEnabled(has_selection and has_driver and has_track)
 
@@ -186,7 +183,7 @@ class ImportDialog(QDialog):
         QMessageBox.warning(self, "Connection Error", msg)
 
     def _do_import(self):
-        driver = self._driver_input.text().strip()
+        driver = self._driver_selector.driver_name
         if not driver:
             QMessageBox.warning(self, "Driver Required", "Please enter a driver name.")
             return
@@ -199,7 +196,7 @@ class ImportDialog(QDialog):
         self._import_btn.setEnabled(False)
         self._refresh_btn.setEnabled(False)
         self._table.setEnabled(False)
-        self._driver_input.setEnabled(False)
+        self._driver_selector.setEnabled(False)
         self._progress.setRange(0, len(selected))
         self._progress.setValue(0)
         self._progress.show()
@@ -226,7 +223,7 @@ class ImportDialog(QDialog):
         self._table.setEnabled(True)
         self._import_btn.setEnabled(True)
         self._refresh_btn.setEnabled(True)
-        self._driver_input.setEnabled(True)
+        self._driver_selector.setEnabled(True)
         QMessageBox.warning(self, "Download Error", msg)
 
     @property

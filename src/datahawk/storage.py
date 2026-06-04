@@ -108,6 +108,14 @@ def list_saved_sessions() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+
+def list_drivers() -> list[str]:
+    """Return distinct driver names from sessions, sorted."""
+    db = _get_db()
+    rows = db.execute("SELECT DISTINCT driver FROM sessions WHERE driver != '' ORDER BY driver").fetchall()
+    db.close()
+    return [r["driver"] for r in rows]
+
 def get_session_file_path(session_id: str) -> Path | None:
     """Return absolute path to session file."""
     db = _get_db()
