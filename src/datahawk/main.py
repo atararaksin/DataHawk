@@ -139,12 +139,6 @@ class MainWindow(QMainWindow):
             from datahawk.storage import save_session_video
             save_session_video(sid, str(video_file), 0.0)
 
-            # Open in analysis window
-            window = self._get_or_create_analysis_window(track_name)
-            window.add_session(parsed, session_built, video_path=Path(path),
-                             label=f"{driver} [GoPro]", session_id=sid)
-            window.show()
-            window.raise_()
             self._browser.refresh()
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
