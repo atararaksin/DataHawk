@@ -20,15 +20,17 @@ class TrackSelector(QWidget):
 
         layout.addWidget(QLabel("Track:"))
         self._combo = QComboBox()
+        self._combo.addItem("")  # blank placeholder
         for t in list_tracks():
             self._combo.addItem(t)
         self._combo.addItem(_NEW_TRACK)
+        self._combo.setCurrentIndex(0)
         self._combo.currentTextChanged.connect(self._on_combo_changed)
         layout.addWidget(self._combo)
 
         self._name_input = QLineEdit()
         self._name_input.setPlaceholderText("Track name")
-        self._name_input.setVisible(self._combo.currentText() == _NEW_TRACK)
+        self._name_input.setVisible(False)
         self._name_input.textChanged.connect(lambda _: self.changed.emit())
         layout.addWidget(self._name_input)
 
