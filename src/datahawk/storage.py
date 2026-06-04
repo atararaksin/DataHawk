@@ -17,6 +17,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
     driver TEXT NOT NULL DEFAULT '',
     date TEXT,
     time TEXT,
@@ -37,6 +38,15 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 """
 
+_MIGRATION = """
+-- Temporary: add source_type and populate from file extension
+ALTER TABLE sessions ADD COLUMN source_type TEXT NOT NULL DEFAULT '';
+UPDATE sessions SET source_type = CASE
+    WHEN file_path LIKE '%.json' THEN 'GoPro'
+    ELSE 'MyChron 5'
+END;
+"""
+
 
 def _get_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,6 +54,11 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Temporary migration: add source_type column
+    try:
+        conn.executescript(_MIGRATION)
+    except sqlite3.OperationalError:
+        pass  # Already migrated
     return conn
 
 
@@ -58,7 +73,7 @@ def get_imported_filenames() -> set[str]:
 def save_session(driver: str, filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
                  track: str = "", best_lap_time: float = None,
-                 extension: str = ".xrz") -> str:
+                 source_type: str = "", extension: str = ".xrz") -> str:
     """Save session file and metadata. Overwrites if already imported. Returns session ID."""
     db = _get_db()
 
@@ -71,9 +86,9 @@ def save_session(driver: str, filename: str, data: bytes,
         (SESSIONS_DIR / existing["file_path"]).write_bytes(data)
         db.execute(
             """UPDATE sessions SET driver=?, date=?, time=?, laps=?, track=?,
-               size=?, best_lap_time=?, imported_at=? WHERE id=?""",
+               size=?, best_lap_time=?, source_type=?, imported_at=? WHERE id=?""",
             (driver, date, time, laps, track, len(data), best_lap_time,
-             datetime.now().isoformat(), existing["id"]),
+             source_type, datetime.now().isoformat(), existing["id"]),
         )
         db.commit()
         db.close()
@@ -85,9 +100,9 @@ def save_session(driver: str, filename: str, data: bytes,
 
     db.execute(
         """INSERT INTO sessions
-           (id, driver, filename, date, time, laps, track, size, best_lap_time, file_path, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (session_id, driver, filename, date, time, laps, track,
+           (id, driver, filename, source_type, date, time, laps, track, size, best_lap_time, file_path, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (session_id, driver, filename, source_type, date, time, laps, track,
          len(data), best_lap_time, rel_path, datetime.now().isoformat()),
     )
     db.commit()
@@ -123,6 +138,14 @@ def get_session_track_name(session_id: str) -> str | None:
     if row:
         return row["track"] or None
     return None
+
+
+def get_session_source_type(session_id: str) -> str:
+    """Return source_type for a session."""
+    db = _get_db()
+    row = db.execute("SELECT source_type FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+    return row["source_type"] if row else ""
 
 
 def delete_track(track_name: str) -> None:

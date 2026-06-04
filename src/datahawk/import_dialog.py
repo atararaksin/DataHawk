@@ -73,6 +73,7 @@ class _DownloadWorker(QThread):
                         laps=s.laps,
                         track=self._track_name,
                         best_lap_time=None,
+                        source_type="MyChron 5",
                     )
                     count += 1
             self.finished.emit(count)

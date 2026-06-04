@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer, AnalysisWindow
-from datahawk.storage import get_session_file_path, get_session_track_name, load_track, save_track
+from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, load_track, save_track
 
 
 class _GoProDialog(QDialog):
@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
             video_file = Path(path)
             from datetime import datetime
             mtime = datetime.fromtimestamp(video_file.stat().st_mtime)
-            parsed.metadata.date = mtime.strftime("%Y-%m-%d")
+            parsed.metadata.date = mtime.strftime("%d/%m/%Y")
             parsed.metadata.time = mtime.strftime("%H:%M:%S")
             parsed.metadata.track = track_name
 
@@ -131,6 +131,7 @@ class MainWindow(QMainWindow):
                 laps=str(len(session_built.laps)),
                 track=track_name,
                 best_lap_time=session_built.laps[session_built.best_lap_index].lap_time if session_built.laps else None,
+                source_type="GoPro",
                 extension=".json",
             )
 
@@ -164,8 +165,9 @@ class MainWindow(QMainWindow):
             window.raise_()
             return
 
-        # Parse based on file extension
-        if path.suffix == '.json':
+        # Parse based on source type
+        source_type = get_session_source_type(session_id)
+        if source_type == "GoPro":
             from datahawk.storage import deserialize_source_session
             parsed = deserialize_source_session(path.read_bytes())
         else:
