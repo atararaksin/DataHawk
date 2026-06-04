@@ -33,7 +33,7 @@ class SessionViewer(QWidget):
         super().__init__(parent)
         self._source_session = source_session
         self._session = session
-        self._session_id = getattr(source_session.metadata, 'original_filename', '') or ''
+        self._session_id = getattr(source_session.metadata, 'filename', '') or ''
         populate_sectors(self._session)
         self._initial_video_path = video_path  # for GoPro sessions
 

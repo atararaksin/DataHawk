@@ -66,7 +66,7 @@ class _DownloadWorker(QThread):
 
                     save_session(
                         driver=self._driver,
-                        original_filename=s.name,
+                        filename=s.name,
                         data=data,
                         date=s.date,
                         time=s.time,

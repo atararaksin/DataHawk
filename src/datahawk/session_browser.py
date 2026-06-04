@@ -32,7 +32,7 @@ class SessionBrowser(QWidget):
         self._sessions = list_saved_sessions()
         self._table.setRowCount(len(self._sessions))
         for i, s in enumerate(self._sessions):
-            self._table.setItem(i, 0, QTableWidgetItem(s["original_filename"]))
+            self._table.setItem(i, 0, QTableWidgetItem(s["filename"]))
             self._table.setItem(i, 1, QTableWidgetItem(s["date"] or ""))
             self._table.setItem(i, 2, QTableWidgetItem(s["time"] or ""))
             self._table.setItem(i, 3, QTableWidgetItem(s["laps"] or ""))

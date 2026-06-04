@@ -16,7 +16,7 @@ DB_PATH = DATA_DIR / "datahawk.db"
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    original_filename TEXT NOT NULL,
+    filename TEXT NOT NULL,
     driver TEXT NOT NULL DEFAULT '',
     date TEXT,
     time TEXT,
@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 """
 
+_MIGRATION = """
+-- Temporary migration: rename original_filename -> filename (remove after first run)
+ALTER TABLE sessions RENAME COLUMN original_filename TO filename;
+"""
+
 
 def _get_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,26 +49,33 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    # Temporary migration: rename original_filename -> filename
+    try:
+        conn.execute(_MIGRATION)
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Already migrated or column doesn't exist
     return conn
 
 
 def get_imported_filenames() -> set[str]:
-    """Return set of original_filename values already imported."""
+    """Return set of filename values already imported."""
     db = _get_db()
-    rows = db.execute("SELECT original_filename FROM sessions").fetchall()
+    rows = db.execute("SELECT filename FROM sessions").fetchall()
     db.close()
-    return {r["original_filename"] for r in rows}
+    return {r["filename"] for r in rows}
 
 
-def save_session(driver: str, original_filename: str, data: bytes,
+def save_session(driver: str, filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
-                 track: str = "", best_lap_time: float = None) -> str:
+                 track: str = "", best_lap_time: float = None,
+                 extension: str = ".xrz") -> str:
     """Save session file and metadata. Overwrites if already imported. Returns session ID."""
     db = _get_db()
 
     existing = db.execute(
-        "SELECT id, file_path FROM sessions WHERE original_filename = ?",
-        (original_filename,)
+        "SELECT id, file_path FROM sessions WHERE filename = ?",
+        (filename,)
     ).fetchone()
 
     if existing:
@@ -79,14 +91,14 @@ def save_session(driver: str, original_filename: str, data: bytes,
         return existing["id"]
 
     session_id = uuid.uuid4().hex[:12]
-    rel_path = f"{session_id}.xrz"
+    rel_path = f"{session_id}{extension}"
     (SESSIONS_DIR / rel_path).write_bytes(data)
 
     db.execute(
         """INSERT INTO sessions
-           (id, driver, original_filename, date, time, laps, track, size, best_lap_time, file_path, imported_at)
+           (id, driver, filename, date, time, laps, track, size, best_lap_time, file_path, imported_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (session_id, driver, original_filename, date, time, laps, track,
+        (session_id, driver, filename, date, time, laps, track,
          len(data), best_lap_time, rel_path, datetime.now().isoformat()),
     )
     db.commit()
@@ -179,3 +191,37 @@ def list_tracks() -> list[str]:
     rows = db.execute("SELECT name FROM tracks ORDER BY name").fetchall()
     db.close()
     return [r["name"] for r in rows]
+
+
+def serialize_source_session(source_session) -> bytes:
+    """Serialize a SourceSession to JSON bytes for storage."""
+    data = {
+        "metadata": {
+            "track": source_session.metadata.track,
+            "date": source_session.metadata.date,
+            "time": source_session.metadata.time,
+            "session_type": source_session.metadata.session_type,
+        },
+        "channels": {
+            name: {
+                "timestamps": ch.timestamps,
+                "values": ch.values,
+            }
+            for name, ch in source_session.channels.items()
+        },
+    }
+    return json.dumps(data).encode()
+
+
+def deserialize_source_session(data: bytes):
+    """Deserialize a SourceSession from JSON bytes."""
+    from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
+    obj = json.loads(data)
+    meta = SourceSessionMetadata(**obj["metadata"])
+    channels = {}
+    for name, ch_data in obj["channels"].items():
+        ch = SourceChannel(name=name)
+        ch.timestamps = ch_data["timestamps"]
+        ch.values = ch_data["values"]
+        channels[name] = ch
+    return SourceSession(metadata=meta, channels=channels)
