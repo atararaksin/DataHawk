@@ -9,6 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Signal
 
 from datahawk.types import Session, Lap
+from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
 
 @dataclass
@@ -32,21 +33,43 @@ class TelemetryGraph(pg.PlotWidget):
         self.addItem(self._cursor)
         self._lap_start_time = 0.0
 
+        # Current value labels (bottom-left corner)
+        self._lap_value_text = pg.TextItem("", color="y", anchor=(0, 1))
+        self._ref_value_text = pg.TextItem("", color="r", anchor=(0, 1))
+        self._lap_value_text.setZValue(1000)
+        self._ref_value_text.setZValue(1000)
+        self._add_value_labels()
+
+        # State for value lookup
+        self._session = None
+        self._current_lap = None
+        self._ref_lap = None
+        self._channel_name = None
+
     def set_cursor_session_time(self, session_time: float):
         """Set cursor position using session time."""
-        self._cursor.setPos(session_time - self._lap_start_time)
+        x = session_time - self._lap_start_time
+        self._cursor.setPos(x)
+        self._update_value_labels(session_time)
 
     def update_plot(self, *, session: Session, lap_idx: int, channel_name: str,
                     ref_lap=None, diff_mode: bool):
         """Redraw the graph for the given lap/channel/reference configuration."""
         self.clear()
         self.addItem(self._cursor)
+        self._add_value_labels()
 
         if lap_idx >= len(session.laps):
             return
 
         lap = session.laps[lap_idx]
         self._lap_start_time = lap.lap_start_time
+
+        # Store for value display
+        self._session = session
+        self._current_lap = lap
+        self._ref_lap = ref_lap
+        self._channel_name = channel_name
 
         if channel_name not in lap.channels:
             return
@@ -122,3 +145,42 @@ class TelemetryGraph(pg.PlotWidget):
         mouse_point = self.plotItem.vb.mapSceneToView(pos)
         session_time = self._lap_start_time + mouse_point.x()
         self.clicked.emit(GraphClicked(session_time=session_time))
+
+    def _add_value_labels(self):
+        self.addItem(self._lap_value_text)
+        self.addItem(self._ref_value_text)
+
+    def _update_value_labels(self, session_time: float):
+        """Update bottom-left value labels using get_channel_value_in_another_lap_with_interpolation."""
+        if not self._session or not self._current_lap or not self._channel_name:
+            self._lap_value_text.setVisible(False)
+            self._ref_value_text.setVisible(False)
+            return
+
+        vb = self.plotItem.vb
+        view_range = vb.viewRange()
+        bx = view_range[0][0]
+        by = view_range[1][0]
+        line_height = (view_range[1][1] - view_range[1][0]) * 0.05
+
+        lap_val = get_channel_value_in_another_lap_with_interpolation(
+            self._session, session_time, self._current_lap, self._channel_name)
+
+        if not math.isnan(lap_val):
+            self._lap_value_text.setText(f"Lap: {lap_val:.1f}")
+            self._lap_value_text.setPos(bx, by + line_height * 2)
+            self._lap_value_text.setVisible(True)
+        else:
+            self._lap_value_text.setVisible(False)
+
+        if self._ref_lap is not None:
+            ref_val = get_channel_value_in_another_lap_with_interpolation(
+                self._session, session_time, self._ref_lap, self._channel_name)
+            if not math.isnan(ref_val):
+                self._ref_value_text.setText(f"Ref: {ref_val:.1f}")
+                self._ref_value_text.setPos(bx, by)
+                self._ref_value_text.setVisible(True)
+            else:
+                self._ref_value_text.setVisible(False)
+        else:
+            self._ref_value_text.setVisible(False)
