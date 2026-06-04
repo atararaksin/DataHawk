@@ -38,15 +38,6 @@ CREATE TABLE IF NOT EXISTS tracks (
 );
 """
 
-_MIGRATION = """
--- Temporary: add source_type and populate from file extension
-ALTER TABLE sessions ADD COLUMN source_type TEXT NOT NULL DEFAULT '';
-UPDATE sessions SET source_type = CASE
-    WHEN file_path LIKE '%.json' THEN 'GoPro'
-    ELSE 'MyChron 5'
-END;
-"""
-
 
 def _get_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -54,11 +45,6 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Temporary migration: add source_type column
-    try:
-        conn.executescript(_MIGRATION)
-    except sqlite3.OperationalError:
-        pass  # Already migrated
     return conn
 
 
