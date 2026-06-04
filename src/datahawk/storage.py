@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     size INTEGER,
     best_lap_time REAL,
     file_path TEXT NOT NULL,
+    video_path TEXT NOT NULL DEFAULT '',
+    video_offset REAL,
     imported_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tracks (
@@ -132,6 +134,25 @@ def get_session_source_type(session_id: str) -> str:
     row = db.execute("SELECT source_type FROM sessions WHERE id = ?", (session_id,)).fetchone()
     db.close()
     return row["source_type"] if row else ""
+
+
+def get_session_video_info(session_id: str) -> tuple[str, float | None]:
+    """Return (video_path, video_offset) for a session."""
+    db = _get_db()
+    row = db.execute("SELECT video_path, video_offset FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+    if row:
+        return row["video_path"] or "", row["video_offset"]
+    return "", None
+
+
+def save_session_video(session_id: str, video_path: str, video_offset: float | None) -> None:
+    """Persist video path and offset for a session."""
+    db = _get_db()
+    db.execute("UPDATE sessions SET video_path=?, video_offset=? WHERE id=?",
+               (video_path, video_offset, session_id))
+    db.commit()
+    db.close()
 
 
 def delete_track(track_name: str) -> None:

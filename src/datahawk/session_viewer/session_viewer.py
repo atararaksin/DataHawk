@@ -29,13 +29,13 @@ class SessionViewer(QWidget):
     track_changed = Signal(object)  # emits Track
     ref_selected = Signal(object)  # emits Lap (the reference lap object)
 
-    def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None):
+    def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None, session_id: str = ""):
         super().__init__(parent)
         self._source_session = source_session
         self._session = session
-        self._session_id = getattr(source_session.metadata, 'filename', '') or ''
+        self._session_id = session_id or getattr(source_session.metadata, 'filename', '') or ''
+        self._video_path = video_path
         populate_sectors(self._session)
-        self._initial_video_path = video_path  # for GoPro sessions
 
         from PySide6.QtWidgets import QApplication
         QApplication.instance().installEventFilter(self)
@@ -64,6 +64,7 @@ class SessionViewer(QWidget):
         self._video = VideoPlayer()
         self._video.set_source_session(source_session)
         self._video.session_time_changed.connect(self.jump_to_time)
+        self._video.video_offset_changed.connect(self._on_video_offset_changed)
 
         top_splitter.addWidget(self._video)
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
@@ -145,8 +146,8 @@ class SessionViewer(QWidget):
             self._update_map_full()
 
         # Auto-load video if provided (GoPro sessions)
-        if self._initial_video_path and self._initial_video_path.exists():
-            self._video.load_video(self._initial_video_path, is_gopro_session=True)
+        if self._video_path and self._video_path.exists():
+            self._video.load_video(self._video_path, is_gopro_session=True)
 
 
     def _rebuild_lap_table(self):
@@ -352,6 +353,12 @@ class SessionViewer(QWidget):
                 self.jump_to_time(self._current_session_time + 5.0)
                 return True
         return super().eventFilter(obj, event)
+
+    def _on_video_offset_changed(self, offset):
+        """Persist video path and offset when sync changes."""
+        if self._session_id and self._video_path:
+            from datahawk.storage import save_session_video
+            save_session_video(self._session_id, str(self._video_path), offset)
 
     def closeEvent(self, event):
         self._video.stop()

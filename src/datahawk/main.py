@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer, AnalysisWindow
-from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, load_track, save_track
+from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track
 
 
 class _GoProDialog(QDialog):
@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
             # Save serialized SourceSession to storage
             data = serialize_source_session(parsed)
             session_built = build_session(parsed, track)
-            save_session(
+            sid = save_session(
                 driver=driver,
                 filename=video_file.name,
                 data=data,
@@ -135,9 +135,14 @@ class MainWindow(QMainWindow):
                 extension=".json",
             )
 
+            # Persist video path with offset 0 (video IS telemetry for GoPro)
+            from datahawk.storage import save_session_video
+            save_session_video(sid, str(video_file), 0.0)
+
             # Open in analysis window
             window = self._get_or_create_analysis_window(track_name)
-            window.add_session(parsed, session_built, video_path=Path(path), label=f"{driver} [GoPro]")
+            window.add_session(parsed, session_built, video_path=Path(path),
+                             label=f"{driver} [GoPro]", session_id=sid)
             window.show()
             window.raise_()
             self._browser.refresh()
@@ -182,12 +187,18 @@ class MainWindow(QMainWindow):
         session = build_session(parsed, track)
         window = self._get_or_create_analysis_window(track_name)
         label = f"{session.date} {session.start_time}"
-        # For GoPro sessions, also pass video path if original file exists
-        video_path = None
-        if path.suffix == '.json':
-            # TODO: store original video path for auto-load
-            pass
-        window.add_session(parsed, session, video_path=video_path, label=label)
+
+        # Load persisted video info
+        video_path_str, video_offset = get_session_video_info(session_id)
+        video_path = Path(video_path_str) if video_path_str and Path(video_path_str).exists() else None
+
+        viewer = window.add_session(parsed, session, video_path=video_path,
+                                    label=label, session_id=session_id)
+
+        # If we have a persisted offset, load video with it directly
+        if video_path and video_offset is not None:
+            viewer._video.load_video_with_offset(video_path, video_offset)
+
         window.show()
         window.raise_()
 
