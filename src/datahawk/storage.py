@@ -47,12 +47,6 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    # Temporary migration: add video_path and video_offset columns
-    for col, typedef in [("video_path", "TEXT NOT NULL DEFAULT ''"), ("video_offset", "REAL")]:
-        try:
-            conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {typedef}")
-        except sqlite3.OperationalError:
-            pass
     return conn
 
 
