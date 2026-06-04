@@ -51,11 +51,11 @@ def _get_db() -> sqlite3.Connection:
 
 
 def get_imported_filenames() -> set[str]:
-    """Return set of filename values already imported."""
+    """Return set of (filename, date, time) tuples already imported."""
     db = _get_db()
-    rows = db.execute("SELECT filename FROM sessions").fetchall()
+    rows = db.execute("SELECT filename, date, time FROM sessions").fetchall()
     db.close()
-    return {r["filename"] for r in rows}
+    return {(r["filename"], r["date"] or "", r["time"] or "") for r in rows}
 
 
 def save_session(driver: str, filename: str, data: bytes,
@@ -66,8 +66,8 @@ def save_session(driver: str, filename: str, data: bytes,
     db = _get_db()
 
     existing = db.execute(
-        "SELECT id, file_path FROM sessions WHERE filename = ?",
-        (filename,)
+        "SELECT id, file_path FROM sessions WHERE filename = ? AND date = ? AND time = ?",
+        (filename, date, time)
     ).fetchone()
 
     if existing:

@@ -175,7 +175,7 @@ class ImportDialog(QDialog):
             self._table.setItem(i, 2, QTableWidgetItem(s.time))
             self._table.setItem(i, 3, QTableWidgetItem(s.laps))
             self._table.setItem(i, 4, QTableWidgetItem(s.track))
-            status = "✓ Imported" if s.name in imported else ""
+            status = "✓ Imported" if (s.name, s.date, s.time) in imported else ""
             item = QTableWidgetItem(status)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(i, 5, item)
