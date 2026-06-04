@@ -40,6 +40,7 @@ class LapTable(QTableWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.cellClicked.connect(self._on_cell_clicked)
+        self._ref_row: int | None = None
 
     def rebuild(self, session: Session):
         """Rebuild table contents from session data."""
@@ -74,7 +75,32 @@ class LapTable(QTableWidget):
                 self.setItem(i, 2 + s, item)
 
         self.resizeColumnsToContents()
+        # Re-apply ref highlight after rebuild
+        if self._ref_row is not None and self._ref_row < self.rowCount():
+            bg = QBrush(QColor(80, 0, 0))
+            for c in range(self.columnCount()):
+                item = self.item(self._ref_row, c)
+                if item:
+                    item.setBackground(bg)
         self.blockSignals(False)
+
+    def set_ref_row(self, row: int | None):
+        """Set which row is the reference lap (background highlight)."""
+        old = self._ref_row
+        self._ref_row = row
+        # Clear old row background
+        if old is not None:
+            for c in range(self.columnCount()):
+                item = self.item(old, c)
+                if item:
+                    item.setData(Qt.BackgroundRole, None)
+        # Set new row background
+        if row is not None:
+            bg = QBrush(QColor(80, 0, 0))
+            for c in range(self.columnCount()):
+                item = self.item(row, c)
+                if item:
+                    item.setBackground(bg)
 
     def select_sector(self, lap_idx: int, sector_idx: int):
         """Highlight the given sector cell for a lap."""

@@ -16,7 +16,8 @@ DB_PATH = DATA_DIR / "datahawk.db"
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    original_filename TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    source_type TEXT NOT NULL DEFAULT '',
     driver TEXT NOT NULL DEFAULT '',
     date TEXT,
     time TEXT,
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     size INTEGER,
     best_lap_time REAL,
     file_path TEXT NOT NULL,
+    video_path TEXT NOT NULL DEFAULT '',
+    video_offset REAL,
     imported_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tracks (
@@ -48,45 +51,46 @@ def _get_db() -> sqlite3.Connection:
 
 
 def get_imported_filenames() -> set[str]:
-    """Return set of original_filename values already imported."""
+    """Return set of (filename, date, time) tuples already imported."""
     db = _get_db()
-    rows = db.execute("SELECT original_filename FROM sessions").fetchall()
+    rows = db.execute("SELECT filename, date, time FROM sessions").fetchall()
     db.close()
-    return {r["original_filename"] for r in rows}
+    return {(r["filename"], r["date"] or "", r["time"] or "") for r in rows}
 
 
-def save_session(driver: str, original_filename: str, data: bytes,
+def save_session(driver: str, filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
-                 track: str = "", best_lap_time: float = None) -> str:
+                 track: str = "", best_lap_time: float = None,
+                 source_type: str = "", extension: str = ".xrz") -> str:
     """Save session file and metadata. Overwrites if already imported. Returns session ID."""
     db = _get_db()
 
     existing = db.execute(
-        "SELECT id, file_path FROM sessions WHERE original_filename = ?",
-        (original_filename,)
+        "SELECT id, file_path FROM sessions WHERE filename = ? AND date = ? AND time = ?",
+        (filename, date, time)
     ).fetchone()
 
     if existing:
         (SESSIONS_DIR / existing["file_path"]).write_bytes(data)
         db.execute(
             """UPDATE sessions SET driver=?, date=?, time=?, laps=?, track=?,
-               size=?, best_lap_time=?, imported_at=? WHERE id=?""",
+               size=?, best_lap_time=?, source_type=?, imported_at=? WHERE id=?""",
             (driver, date, time, laps, track, len(data), best_lap_time,
-             datetime.now().isoformat(), existing["id"]),
+             source_type, datetime.now().isoformat(), existing["id"]),
         )
         db.commit()
         db.close()
         return existing["id"]
 
     session_id = uuid.uuid4().hex[:12]
-    rel_path = f"{session_id}.xrz"
+    rel_path = f"{session_id}{extension}"
     (SESSIONS_DIR / rel_path).write_bytes(data)
 
     db.execute(
         """INSERT INTO sessions
-           (id, driver, original_filename, date, time, laps, track, size, best_lap_time, file_path, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (session_id, driver, original_filename, date, time, laps, track,
+           (id, driver, filename, source_type, date, time, laps, track, size, best_lap_time, file_path, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (session_id, driver, filename, source_type, date, time, laps, track,
          len(data), best_lap_time, rel_path, datetime.now().isoformat()),
     )
     db.commit()
@@ -103,6 +107,14 @@ def list_saved_sessions() -> list[dict]:
     db.close()
     return [dict(r) for r in rows]
 
+
+
+def list_drivers() -> list[str]:
+    """Return distinct driver names from sessions, sorted."""
+    db = _get_db()
+    rows = db.execute("SELECT DISTINCT driver FROM sessions WHERE driver != '' ORDER BY driver").fetchall()
+    db.close()
+    return [r["driver"] for r in rows]
 
 def get_session_file_path(session_id: str) -> Path | None:
     """Return absolute path to session file."""
@@ -122,6 +134,33 @@ def get_session_track_name(session_id: str) -> str | None:
     if row:
         return row["track"] or None
     return None
+
+
+def get_session_source_type(session_id: str) -> str:
+    """Return source_type for a session."""
+    db = _get_db()
+    row = db.execute("SELECT source_type FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+    return row["source_type"] if row else ""
+
+
+def get_session_video_info(session_id: str) -> tuple[str, float | None]:
+    """Return (video_path, video_offset) for a session."""
+    db = _get_db()
+    row = db.execute("SELECT video_path, video_offset FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    db.close()
+    if row:
+        return row["video_path"] or "", row["video_offset"]
+    return "", None
+
+
+def save_session_video(session_id: str, video_path: str, video_offset: float | None) -> None:
+    """Persist video path and offset for a session."""
+    db = _get_db()
+    db.execute("UPDATE sessions SET video_path=?, video_offset=? WHERE id=?",
+               (video_path, video_offset, session_id))
+    db.commit()
+    db.close()
 
 
 def delete_track(track_name: str) -> None:
@@ -179,3 +218,37 @@ def list_tracks() -> list[str]:
     rows = db.execute("SELECT name FROM tracks ORDER BY name").fetchall()
     db.close()
     return [r["name"] for r in rows]
+
+
+def serialize_source_session(source_session) -> bytes:
+    """Serialize a SourceSession to JSON bytes for storage."""
+    data = {
+        "metadata": {
+            "track": source_session.metadata.track,
+            "date": source_session.metadata.date,
+            "time": source_session.metadata.time,
+            "session_type": source_session.metadata.session_type,
+        },
+        "channels": {
+            name: {
+                "timestamps": ch.timestamps,
+                "values": ch.values,
+            }
+            for name, ch in source_session.channels.items()
+        },
+    }
+    return json.dumps(data).encode()
+
+
+def deserialize_source_session(data: bytes):
+    """Deserialize a SourceSession from JSON bytes."""
+    from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
+    obj = json.loads(data)
+    meta = SourceSessionMetadata(**obj["metadata"])
+    channels = {}
+    for name, ch_data in obj["channels"].items():
+        ch = SourceChannel(name=name)
+        ch.timestamps = ch_data["timestamps"]
+        ch.values = ch_data["values"]
+        channels[name] = ch
+    return SourceSession(metadata=meta, channels=channels)

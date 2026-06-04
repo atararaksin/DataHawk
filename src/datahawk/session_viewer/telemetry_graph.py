@@ -37,7 +37,7 @@ class TelemetryGraph(pg.PlotWidget):
         self._cursor.setPos(session_time - self._lap_start_time)
 
     def update_plot(self, *, session: Session, lap_idx: int, channel_name: str,
-                    ref_lap_idx: int | None, diff_mode: bool):
+                    ref_lap=None, diff_mode: bool):
         """Redraw the graph for the given lap/channel/reference configuration."""
         self.clear()
         self.addItem(self._cursor)
@@ -54,9 +54,9 @@ class TelemetryGraph(pg.PlotWidget):
         ch = lap.channels[channel_name]
 
         if diff_mode:
-            self._plot_diff(session, lap, lap_idx, ch, channel_name, ref_lap_idx)
+            self._plot_diff(session, lap, lap_idx, ch, channel_name, ref_lap)
         else:
-            self._plot_normal(session, lap, lap_idx, ch, channel_name, ref_lap_idx)
+            self._plot_normal(session, lap, lap_idx, ch, channel_name, ref_lap)
 
         # Sector split lines
         s1_line = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("w", width=1),
@@ -72,12 +72,11 @@ class TelemetryGraph(pg.PlotWidget):
         self.enableAutoRange()
 
     def _plot_diff(self, session: Session, lap: Lap, lap_idx: int,
-                   ch, channel_name: str, ref_lap_idx: int | None):
+                   ch, channel_name: str, ref_lap):
         mc = lap.master_clk
         if not mc:
             return
         t0 = lap.lap_start_time
-        ref_lap = session.laps[ref_lap_idx] if ref_lap_idx is not None and ref_lap_idx != lap_idx else None
         ref_ch = ref_lap.channels.get(channel_name) if ref_lap else None
 
         diff_times = []
@@ -97,13 +96,12 @@ class TelemetryGraph(pg.PlotWidget):
             self.plot(diff_times, diff_values, pen=pg.mkPen("c", width=1), name="Diff")
 
     def _plot_normal(self, session: Session, lap: Lap, lap_idx: int,
-                     ch, channel_name: str, ref_lap_idx: int | None):
+                     ch, channel_name: str, ref_lap):
         self.setLabel("left", channel_name)
         self.plot(ch.raw_timestamps, ch.raw_values, pen=pg.mkPen("y", width=1), name=f"Lap {lap_idx + 1}")
 
         # Reference lap overlay
-        if ref_lap_idx is not None and ref_lap_idx != lap_idx:
-            ref_lap = session.laps[ref_lap_idx]
+        if ref_lap is not None and ref_lap is not lap:
             if channel_name in ref_lap.channels:
                 mc = lap.master_clk
                 if mc:
@@ -115,7 +113,7 @@ class TelemetryGraph(pg.PlotWidget):
                             ref_times.append(t - t0)
                             ref_samples.append(v)
                     if ref_times:
-                        self.plot(ref_times, ref_samples, pen=pg.mkPen("g", width=1), name=f"Lap {ref_lap_idx + 1}")
+                        self.plot(ref_times, ref_samples, pen=pg.mkPen("r", width=1), name="Ref")
 
     def _on_click(self, event):
         pos = event.scenePos()

@@ -1,15 +1,15 @@
-"""Reusable track selection widget."""
+"""Reusable driver selection widget."""
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
 from PySide6.QtCore import Signal
 
-from datahawk.storage import list_tracks
+from datahawk.storage import list_drivers
 
-_NEW_TRACK = "➕ Add new track..."
+_NEW_DRIVER = "➕ Add new driver..."
 
 
-class TrackSelector(QWidget):
-    """Combo box with existing tracks + 'Add new' option with inline name input."""
+class DriverSelector(QWidget):
+    """Combo box with existing drivers + 'Add new' option with inline name input."""
 
     changed = Signal()
 
@@ -19,33 +19,29 @@ class TrackSelector(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("Track:"))
+        row.addWidget(QLabel("Driver:"))
         self._combo = QComboBox()
         self._combo.addItem("")  # blank placeholder
-        for t in list_tracks():
-            self._combo.addItem(t)
-        self._combo.addItem(_NEW_TRACK)
+        for d in list_drivers():
+            self._combo.addItem(d)
+        self._combo.addItem(_NEW_DRIVER)
         self._combo.setCurrentIndex(0)
         self._combo.currentTextChanged.connect(self._on_combo_changed)
         row.addWidget(self._combo)
         layout.addLayout(row)
 
         self._name_input = QLineEdit()
-        self._name_input.setPlaceholderText("Track name")
+        self._name_input.setPlaceholderText("Driver name")
         self._name_input.setVisible(False)
         self._name_input.textChanged.connect(lambda _: self.changed.emit())
         layout.addWidget(self._name_input)
 
     def _on_combo_changed(self, text: str):
-        self._name_input.setVisible(text == _NEW_TRACK)
+        self._name_input.setVisible(text == _NEW_DRIVER)
         self.changed.emit()
 
     @property
-    def is_new_track(self) -> bool:
-        return self._combo.currentText() == _NEW_TRACK
-
-    @property
-    def track_name(self) -> str:
-        if self.is_new_track:
+    def driver_name(self) -> str:
+        if self._combo.currentText() == _NEW_DRIVER:
             return self._name_input.text().strip()
         return self._combo.currentText().strip()

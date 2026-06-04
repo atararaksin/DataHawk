@@ -20,6 +20,8 @@ class VideoPlayer(QWidget):
 
     # Emitted at 50Hz during synced playback with the current session time
     session_time_changed = Signal(float)
+    # Emitted when video offset changes (auto-sync or manual resync)
+    video_offset_changed = Signal(object)  # float or None
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -91,8 +93,18 @@ class VideoPlayer(QWidget):
         if is_gopro_session:
             self._video_offset = 0.0
             self._activate_sync()
+            self.video_offset_changed.emit(0.0)
         else:
             QTimer.singleShot(100, lambda: self._compute_sync(str(path)))
+
+    def load_video_with_offset(self, path: Path, offset: float):
+        """Load a video file with a known offset (from DB)."""
+        self._player.setSource(QUrl.fromLocalFile(str(path)))
+        self._btn_play.setEnabled(True)
+        self._slider.setEnabled(True)
+        self._player.setPosition(1)
+        self._video_offset = offset
+        self._activate_sync()
 
     def seek_to_session_time(self, session_time: float):
         """Seek video to match a given session time (only if sync is active)."""
@@ -158,6 +170,7 @@ class VideoPlayer(QWidget):
 
             self._video_offset = result.offset_seconds
             self._activate_sync()
+            self.video_offset_changed.emit(self._video_offset)
         except Exception:
             self._video_offset = None
             self._btn_sync.setEnabled(True)
@@ -182,10 +195,12 @@ class VideoPlayer(QWidget):
             self._btn_sync.setStyleSheet("background-color: green;")
             if self._player.playbackState() == QMediaPlayer.PlayingState:
                 self._sync_timer.start()
+            self.video_offset_changed.emit(self._video_offset)
         else:
             self._video_offset = None
             self._btn_sync.setStyleSheet("")
             self._sync_timer.stop()
+            self.video_offset_changed.emit(None)
 
     def _on_duration(self, ms):
         self._slider.setRange(0, ms)
