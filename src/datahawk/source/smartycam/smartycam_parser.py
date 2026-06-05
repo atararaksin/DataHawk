@@ -16,7 +16,7 @@ from pathlib import Path
 
 from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
 from datahawk.source.channel_constants import (
-    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, GPS_HEADING, MASTER_CLK,
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK,
 )
 from datahawk.utils.mp4_utils import find_top_level_box
 
@@ -81,7 +81,7 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
             raise ValueError("No aimd telemetry track found")
 
         # Read all samples
-        gps_fixes: list[tuple[float, float, float, float, float]] = []  # (ts_sec, lat, lon, speed_kmh, heading)
+        gps_fixes: list[tuple[float, float, float, float]] = []  # (ts_sec, lat, lon, speed_kmh)
         channel_data: dict[int, list[tuple[float, float]]] = {}  # ch_id -> [(ts_sec, value)]
 
         sample_offsets = _compute_sample_offsets(stco_data, stsz_data, sample_count, stsc_entries)
@@ -105,25 +105,22 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
     lat_ch = SourceChannel(name=GPS_LATITUDE)
     lon_ch = SourceChannel(name=GPS_LONGITUDE)
     speed_ch = SourceChannel(name=GPS_SPEED)
-    heading_ch = SourceChannel(name=GPS_HEADING)
     mclk_ch = SourceChannel(name=MASTER_CLK)
 
     # Normalize timestamps: first GPS fix defines t=0
     t0 = gps_fixes[0][0]
 
-    for ts, lat, lon, speed, heading in gps_fixes:
+    for ts, lat, lon, speed in gps_fixes:
         t = ts - t0
         lat_ch.append(t, lat)
         lon_ch.append(t, lon)
         speed_ch.append(t, speed)
-        heading_ch.append(t, heading)
         mclk_ch.append(t, ts)  # Master Clock = absolute time from power-on
 
     channels = {
         GPS_LATITUDE: lat_ch,
         GPS_LONGITUDE: lon_ch,
         GPS_SPEED: speed_ch,
-        GPS_HEADING: heading_ch,
         MASTER_CLK: mclk_ch,
     }
 
@@ -309,14 +306,7 @@ def _parse_gps_section(sample: bytes, gps_idx: int, gps_fixes: list) -> None:
     if abs(lat) < 1.0 or abs(lon) < 1.0:
         return
 
-    # Heading from horizontal velocity components (approximate from ECEF velocity)
-    # Project velocity to local ENU frame for heading
-    if speed_ms < 1.0:
-        heading = float('nan')
-    else:
-        heading = _ecef_velocity_to_heading(ecef_x, ecef_y, ecef_z, vx, vy, vz)
-
-    gps_fixes.append((ts_sec, lat, lon, speed_kmh, heading))
+    gps_fixes.append((ts_sec, lat, lon, speed_kmh))
 
 
 def _ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float]:
@@ -329,30 +319,3 @@ def _ecef_to_geodetic(x_m: float, y_m: float, z_m: float) -> tuple[float, float]
         p - _WGS84_E2 * _WGS84_A * math.cos(theta) ** 3,
     ))
     return lat, lon
-
-
-def _ecef_velocity_to_heading(x: float, y: float, z: float,
-                              vx: float, vy: float, vz: float) -> float:
-    """Convert ECEF velocity to heading (degrees, 0=North, clockwise).
-
-    Projects ECEF velocity into local East-North-Up frame at the given position.
-    """
-    # Compute local frame unit vectors at position
-    lon = math.atan2(y, x)
-    p = math.hypot(x, y)
-    lat = math.atan2(z, p)
-
-    sin_lat, cos_lat = math.sin(lat), math.cos(lat)
-    sin_lon, cos_lon = math.sin(lon), math.cos(lon)
-
-    # East unit vector
-    e_e = (-sin_lon, cos_lon, 0)
-    # North unit vector
-    e_n = (-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat)
-
-    # Project velocity onto east/north
-    v_east = vx * e_e[0] + vy * e_e[1] + vz * e_e[2]
-    v_north = vx * e_n[0] + vy * e_n[1] + vz * e_n[2]
-
-    heading = math.degrees(math.atan2(v_east, v_north)) % 360
-    return heading
