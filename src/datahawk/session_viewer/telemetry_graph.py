@@ -39,7 +39,8 @@ class TelemetryGraph(pg.PlotWidget):
         self._value_label = QLabel(self)
         self._value_label.setStyleSheet("color: yellow; background: transparent; font-size: 12px; padding: 4px;")
         self._value_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._value_label.move(50, 0)  # will be repositioned in resizeEvent
+        self._value_label.setFixedSize(150, 40)
+        self._value_label.move(50, 0)
 
         # State for value lookup
         self._session = None
