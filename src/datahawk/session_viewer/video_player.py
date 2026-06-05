@@ -22,13 +22,15 @@ class VideoPlayer(QWidget):
     session_time_changed = Signal(float)
     # Emitted when video offset changes (auto-sync or manual resync)
     video_offset_changed = Signal(object)  # float or None
+    # Emitted when user loads a new video file via the Load button
+    video_path_changed = Signal(object)  # Path
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._video_offset: float | None = None
         self._current_session_time = 0.0
         self._source_session: SourceSession | None = None
-        self._is_gopro_session = False
+        self._is_mychron_session = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -83,22 +85,23 @@ class VideoPlayer(QWidget):
         """Set the source session for sync computation."""
         self._source_session = source_session
 
-    def load_video(self, path: Path, *, is_gopro_session: bool = False):
-        """Load a video file. If is_gopro_session, sync offset is 0 (video IS telemetry)."""
-        self._is_gopro_session = is_gopro_session
+    def load_video(self, path: Path, *, is_mychron_session: bool = False):
+        """Load a video file. If is_mychron_session, run auto-sync. Otherwise offset is 0."""
+        self._is_mychron_session = is_mychron_session
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         self._btn_play.setEnabled(True)
         self._slider.setEnabled(True)
         self._player.setPosition(1)
-        if is_gopro_session:
+        if is_mychron_session:
+            QTimer.singleShot(100, lambda: self._compute_sync(str(path)))
+        else:
             self._video_offset = 0.0
             self._activate_sync()
             self.video_offset_changed.emit(0.0)
-        else:
-            QTimer.singleShot(100, lambda: self._compute_sync(str(path)))
 
-    def load_video_with_offset(self, path: Path, offset: float):
+    def load_video_with_offset(self, path: Path, offset: float, *, is_mychron_session: bool = False):
         """Load a video file with a known offset (from DB)."""
+        self._is_mychron_session = is_mychron_session
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         self._btn_play.setEnabled(True)
         self._slider.setEnabled(True)
@@ -137,7 +140,8 @@ class VideoPlayer(QWidget):
         path, _ = QFileDialog.getOpenFileName(
             self, "Load Video", "", "Video (*.mp4 *.MP4 *.mov *.avi)")
         if path:
-            self.load_video(Path(path))
+            self.video_path_changed.emit(Path(path))
+            self.load_video(Path(path), is_mychron_session=self._is_mychron_session)
 
     def _compute_sync(self, video_path: str):
         try:
@@ -147,7 +151,7 @@ class VideoPlayer(QWidget):
             from datahawk.source.insta360.insta360_video_sync import is_insta360_video
             from datahawk.source.insta360.insta360_video_sync import sync_by_acceleration as insta360_sync_accel
 
-            if self._is_gopro_session:
+            if not self._is_mychron_session:
                 self._video_offset = 0.0
                 self._activate_sync()
                 return

@@ -291,7 +291,7 @@ def _parse_gps_section(sample: bytes, gps_idx: int, gps_fixes: list) -> None:
     ecef_y = struct.unpack("<i", payload[20:24])[0] / 100.0
     ecef_z = struct.unpack("<i", payload[24:28])[0] / 100.0
 
-    # Velocity for speed and heading
+    # Velocity for speed
     vx = struct.unpack("<i", payload[32:36])[0] / 100.0  # cm/s -> m/s
     vy = struct.unpack("<i", payload[36:40])[0] / 100.0
     vz = struct.unpack("<i", payload[40:44])[0] / 100.0

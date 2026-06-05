@@ -188,11 +188,16 @@ class MainWindow(QMainWindow):
         video_path = Path(video_path_str) if video_path_str and Path(video_path_str).exists() else None
 
         viewer = window.add_session(parsed, session, video_path=video_path,
-                                    label=label, session_id=session_id)
+                                    label=label, session_id=session_id, source_type=source_type)
 
-        # If we have a persisted offset, load video with it directly
+        # Load video with persisted offset if available
         if video_path and video_offset is not None:
-            viewer._video.load_video_with_offset(video_path, video_offset)
+            is_mychron = source_type not in ("GoPro", "SmartyCam")
+            viewer._video.load_video_with_offset(video_path, video_offset, is_mychron_session=is_mychron)
+        elif video_path:
+            # No persisted offset -- run auto-sync for mychron, offset=0 for others
+            is_mychron = source_type not in ("GoPro", "SmartyCam")
+            viewer._video.load_video(video_path, is_mychron_session=is_mychron)
 
         window.show()
         window.raise_()
