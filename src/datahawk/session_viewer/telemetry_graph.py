@@ -169,5 +169,5 @@ class TelemetryGraph(pg.PlotWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Keep label at bottom-left of plot area
-        self._value_label.move(50, self.height() - 40)
+        if hasattr(self, '_value_label'):
+            self._value_label.move(50, self.height() - 40)
