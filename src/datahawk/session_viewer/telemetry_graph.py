@@ -9,6 +9,7 @@ import pyqtgraph as pg
 from PySide6.QtCore import Signal
 
 from datahawk.types import Session, Lap
+from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
 
 @dataclass
@@ -32,9 +33,26 @@ class TelemetryGraph(pg.PlotWidget):
         self.addItem(self._cursor)
         self._lap_start_time = 0.0
 
+        # Current value label (bottom-left overlay, doesn't affect graph range)
+        from PySide6.QtWidgets import QLabel
+        from PySide6.QtCore import Qt
+        self._value_label = QLabel(self)
+        self._value_label.setStyleSheet("color: yellow; background: transparent; font-size: 12px; padding: 4px;")
+        self._value_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._value_label.setFixedSize(150, 40)
+        self._value_label.move(50, 0)
+
+        # State for value lookup
+        self._session = None
+        self._current_lap = None
+        self._ref_lap = None
+        self._channel_name = None
+
     def set_cursor_session_time(self, session_time: float):
         """Set cursor position using session time."""
-        self._cursor.setPos(session_time - self._lap_start_time)
+        x = session_time - self._lap_start_time
+        self._cursor.setPos(x)
+        self._update_value_labels(session_time)
 
     def update_plot(self, *, session: Session, lap_idx: int, channel_name: str,
                     ref_lap=None, diff_mode: bool):
@@ -47,6 +65,12 @@ class TelemetryGraph(pg.PlotWidget):
 
         lap = session.laps[lap_idx]
         self._lap_start_time = lap.lap_start_time
+
+        # Store for value display
+        self._session = session
+        self._current_lap = lap
+        self._ref_lap = ref_lap
+        self._channel_name = channel_name
 
         if channel_name not in lap.channels:
             return
@@ -122,3 +146,29 @@ class TelemetryGraph(pg.PlotWidget):
         mouse_point = self.plotItem.vb.mapSceneToView(pos)
         session_time = self._lap_start_time + mouse_point.x()
         self.clicked.emit(GraphClicked(session_time=session_time))
+
+    def _update_value_labels(self, session_time: float):
+        """Update bottom-left value label overlay."""
+        if not self._session or not self._current_lap or not self._channel_name:
+            self._value_label.setText("")
+            return
+
+        lap_val = get_channel_value_in_another_lap_with_interpolation(
+            self._session, session_time, self._current_lap, self._channel_name)
+
+        lines = []
+        if not math.isnan(lap_val):
+            lines.append(f'<span style="color: yellow;">Lap: {lap_val:.1f}</span>')
+
+        if self._ref_lap is not None:
+            ref_val = get_channel_value_in_another_lap_with_interpolation(
+                self._session, session_time, self._ref_lap, self._channel_name)
+            if not math.isnan(ref_val):
+                lines.append(f'<span style="color: red;">Ref: {ref_val:.1f}</span>')
+
+        self._value_label.setText("<br>".join(lines))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, '_value_label'):
+            self._value_label.move(50, self.height() - 40)

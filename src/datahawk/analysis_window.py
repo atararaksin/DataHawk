@@ -69,3 +69,8 @@ class AnalysisWindow(QMainWindow):
         self._tabs.removeTab(index)
         if self._tabs.count() == 0:
             self.close()
+
+    def closeEvent(self, event):
+        for i in range(self._tabs.count()):
+            self._tabs.widget(i).close()
+        super().closeEvent(event)
