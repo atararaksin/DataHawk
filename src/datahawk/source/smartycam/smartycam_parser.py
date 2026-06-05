@@ -16,7 +16,7 @@ from pathlib import Path
 
 from datahawk.source.types import SourceChannel, SourceSession, SourceSessionMetadata
 from datahawk.source.channel_constants import (
-    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK,
+    GPS_LATITUDE, GPS_LONGITUDE, GPS_SPEED, MASTER_CLK, RPM,
 )
 from datahawk.utils.mp4_utils import find_top_level_box
 
@@ -55,6 +55,11 @@ _CH_LATERAL_ACC = 0x2E
 _CH_INLINE_ACC = 0x2F
 _CH_VERTICAL_ACC = 0x32
 
+# Map CAN channel IDs to SourceSession channel names
+_CAN_CHANNEL_NAMES = {
+    _CH_RPM: RPM,
+}
+
 
 def parse_smartycam(video_path: str | Path) -> SourceSession:
     """Parse telemetry from a SmartyCam MP4 into a SourceSession.
@@ -82,9 +87,11 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
 
         # Read all samples
         gps_fixes: list[tuple[float, float, float, float]] = []  # (ts_sec, lat, lon, speed_kmh)
-        channel_data: dict[int, list[tuple[float, float]]] = {}  # ch_id -> [(ts_sec, value)]
+        channel_data: dict[int, list[tuple[float, float]]] = {}  # ch_id -> [(ts_ms, value)]
 
         sample_offsets = _compute_sample_offsets(stco_data, stsz_data, sample_count, stsc_entries)
+
+        first_gps_ts_ms: int | None = None  # for anchoring (S) timestamps
 
         for i in range(sample_count):
             off = sample_offsets[i]
@@ -96,7 +103,12 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
             if i == 0 and sample.find(b"amv0") >= 0 and sample.find(b"hCHS") >= 0:
                 continue
 
-            _parse_sample(sample, gps_fixes, channel_data)
+            # Get GPS timestamp from this sample to anchor (S) records
+            gps_ts_ms = _get_gps_timestamp_ms(sample)
+            if gps_ts_ms is not None and first_gps_ts_ms is None:
+                first_gps_ts_ms = gps_ts_ms
+
+            _parse_sample(sample, gps_fixes, channel_data, gps_ts_ms, first_gps_ts_ms)
 
     if not gps_fixes:
         raise ValueError("No GPS data found in SmartyCam video")
@@ -123,6 +135,17 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
         GPS_SPEED: speed_ch,
         MASTER_CLK: mclk_ch,
     }
+
+    # Add CAN bus channels (RPM, etc.)
+    for ch_id, name in _CAN_CHANNEL_NAMES.items():
+        if ch_id in channel_data:
+            ch = SourceChannel(name=name)
+            for ts_ms, val in channel_data[ch_id]:
+                t = ts_ms / 1000.0 - t0
+                if t >= 0:
+                    ch.append(t, val)
+            if ch.values:
+                channels[name] = ch
 
     metadata = SourceSessionMetadata(
         track="",
@@ -222,10 +245,22 @@ def _compute_sample_offsets(stco_data: bytes, stsz_data: bytes, sample_count: in
     return offsets
 
 
-def _parse_sample(sample: bytes, gps_fixes: list, channel_data: dict) -> None:
+def _get_gps_timestamp_ms(sample: bytes) -> int | None:
+    """Extract GPS timestamp (ms from power-on) from a sample's hGPS section."""
+    gps_idx = sample.find(b"hGPS")
+    if gps_idx < 0:
+        return None
+    payload_start = gps_idx + 11
+    if payload_start + 4 > len(sample):
+        return None
+    return struct.unpack("<I", sample[payload_start:payload_start + 4])[0]
+
+
+def _parse_sample(sample: bytes, gps_fixes: list, channel_data: dict,
+                  gps_ts_ms: int | None, first_gps_ts_ms: int | None) -> None:
     """Parse a single aimd sample, extracting GPS fixes and channel values."""
     # Parse (S records for channel values
-    _parse_channel_records(sample, channel_data)
+    _parse_channel_records(sample, channel_data, gps_ts_ms, first_gps_ts_ms)
 
     # Parse GPS section
     gps_idx = sample.find(b"hGPS")
@@ -233,11 +268,19 @@ def _parse_sample(sample: bytes, gps_fixes: list, channel_data: dict) -> None:
         _parse_gps_section(sample, gps_idx, gps_fixes)
 
 
-def _parse_channel_records(sample: bytes, channel_data: dict) -> None:
+def _parse_channel_records(sample: bytes, channel_data: dict,
+                           gps_ts_ms: int | None, first_gps_ts_ms: int | None) -> None:
     """Parse '(S' tagged channel value records from a sample.
 
     Record format (13 bytes): 28 53 [ts_le_u16] [2 pad] [ch_id] [1 pad] [value_le_f32] [29]
+    The 16-bit timestamp is GPS ms mod 65536. We reconstruct the full ms timestamp
+    using the GPS timestamp from the same sample.
     """
+    if gps_ts_ms is None or first_gps_ts_ms is None:
+        return
+
+    gps_base = gps_ts_ms & ~0xFFFF  # high 16 bits of GPS timestamp
+
     idx = 0
     while idx + 13 <= len(sample):
         p = sample.find(b"\x28\x53", idx)
@@ -247,15 +290,22 @@ def _parse_channel_records(sample: bytes, channel_data: dict) -> None:
             idx = p + 2
             continue
 
-        ts_cs = struct.unpack("<H", sample[p + 2:p + 4])[0]
+        ts16 = struct.unpack("<H", sample[p + 2:p + 4])[0]
         ch_id = sample[p + 6]
         value = struct.unpack("<f", sample[p + 8:p + 12])[0]
 
         if not math.isnan(value) and value != -2.0:  # -2.0 and NaN are sentinel values
-            ts_sec = ts_cs / 1000.0  # milliseconds from power-on
+            # Reconstruct full ms timestamp from 16-bit wrapped value
+            full_ts_ms = gps_base | ts16
+            # Handle wrap-around (if ts16 > gps low bits, it might be from previous cycle)
+            if full_ts_ms > gps_ts_ms + 32768:
+                full_ts_ms -= 65536
+            elif full_ts_ms < gps_ts_ms - 32768:
+                full_ts_ms += 65536
+
             if ch_id not in channel_data:
                 channel_data[ch_id] = []
-            channel_data[ch_id].append((ts_sec, value))
+            channel_data[ch_id].append((full_ts_ms, value))
 
         idx = p + 13
 
