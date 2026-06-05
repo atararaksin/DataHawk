@@ -115,7 +115,7 @@ def parse_smartycam(video_path: str | Path) -> SourceSession:
         lat_ch.append(t, lat)
         lon_ch.append(t, lon)
         speed_ch.append(t, speed)
-        mclk_ch.append(t, ts)  # Master Clock = absolute time from power-on
+        mclk_ch.append(t, t)  # Master Clock = session time (normalized)
 
     channels = {
         GPS_LATITUDE: lat_ch,
