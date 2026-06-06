@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QBrush, QColor
 
 from datahawk.types import Session
+from datahawk.source.channel_constants import RPM
 
 
 @dataclass
@@ -46,7 +47,10 @@ class LapTable(QTableWidget):
         """Rebuild table contents from session data."""
         self.blockSignals(True)
         n_sectors = len(session.laps[0].sector_times) if session.laps else 0
+        has_rpm = any(RPM in lap.channels for lap in session.laps)
         headers = ["Lap", "Time"] + [f"S{i+1}" for i in range(n_sectors)]
+        if has_rpm:
+            headers.append("Avg RPM")
         self.setColumnCount(len(headers))
         self.setRowCount(len(session.laps))
         self.setHorizontalHeaderLabels(headers)
@@ -73,6 +77,12 @@ class LapTable(QTableWidget):
                 if not math.isnan(st) and st == best_sectors[s]:
                     item.setForeground(purple)
                 self.setItem(i, 2 + s, item)
+
+            if has_rpm and RPM in lap.channels:
+                vals = [v for v in lap.channels[RPM].raw_values if not math.isnan(v)]
+                avg = sum(vals) / len(vals) if vals else float('nan')
+                text = str(int(avg)) if not math.isnan(avg) else "—"
+                self.setItem(i, 2 + n_sectors, QTableWidgetItem(text))
 
         self.resizeColumnsToContents()
         # Re-apply ref highlight after rebuild
@@ -112,5 +122,7 @@ class LapTable(QTableWidget):
     def _on_cell_clicked(self, row: int, col: int):
         if col < 2:
             self.lap_clicked.emit(LapTableLapClicked(lap_idx=row))
-        else:
+        elif col < self.columnCount() and self.horizontalHeaderItem(col).text().startswith("S"):
             self.sector_clicked.emit(LapTableSectorClicked(lap_idx=row, sector_idx=col - 2))
+        else:
+            self.lap_clicked.emit(LapTableLapClicked(lap_idx=row))
