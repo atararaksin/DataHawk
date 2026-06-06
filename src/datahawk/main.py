@@ -84,18 +84,24 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from datahawk.source.gopro.gopro_parser import parse_gopro
             from datahawk.source.gopro.gopro_video_sync import is_gopro_video
+            from datahawk.source.smartycam.smartycam_parser import is_smartycam_video
+            from datahawk.source.gopro.gopro_parser import parse_gopro
             from datahawk.session_processing import build_session, detect_sf_line, detect_master_lap
             from datahawk.storage import save_session, serialize_source_session
             from datahawk.types import Track
 
-            if not is_gopro_video(path):
+            if is_smartycam_video(path):
+                from datahawk.source.smartycam.smartycam_parser import parse_smartycam
+                parsed = parse_smartycam(path)
+                source_type = "SmartyCam"
+            elif is_gopro_video(path):
+                parsed, _timo = parse_gopro(path)
+                source_type = "GoPro"
+            else:
                 QMessageBox.warning(self, "Error",
                     "Unsupported camera or video lacks GPS telemetry")
                 return
-
-            parsed, _timo = parse_gopro(path)
 
             # Extract date/time from video file metadata
             video_file = Path(path)
@@ -126,7 +132,7 @@ class MainWindow(QMainWindow):
                 laps=str(len(session_built.laps)),
                 track=track_name,
                 best_lap_time=session_built.laps[session_built.best_lap_index].lap_time if session_built.laps else None,
-                source_type="GoPro",
+                source_type=source_type,
                 extension=".json",
             )
 
@@ -161,7 +167,7 @@ class MainWindow(QMainWindow):
 
         # Parse based on source type
         source_type = get_session_source_type(session_id)
-        if source_type == "GoPro":
+        if source_type in ("GoPro", "SmartyCam"):
             from datahawk.storage import deserialize_source_session
             parsed = deserialize_source_session(path.read_bytes())
         else:
@@ -182,11 +188,16 @@ class MainWindow(QMainWindow):
         video_path = Path(video_path_str) if video_path_str and Path(video_path_str).exists() else None
 
         viewer = window.add_session(parsed, session, video_path=video_path,
-                                    label=label, session_id=session_id)
+                                    label=label, session_id=session_id, source_type=source_type)
 
-        # If we have a persisted offset, load video with it directly
+        # Load video with persisted offset if available
         if video_path and video_offset is not None:
-            viewer._video.load_video_with_offset(video_path, video_offset)
+            is_mychron = source_type not in ("GoPro", "SmartyCam")
+            viewer._video.load_video_with_offset(video_path, video_offset, is_mychron_session=is_mychron)
+        elif video_path:
+            # No persisted offset -- run auto-sync for mychron, offset=0 for others
+            is_mychron = source_type not in ("GoPro", "SmartyCam")
+            viewer._video.load_video(video_path, is_mychron_session=is_mychron)
 
         window.show()
         window.raise_()

@@ -29,12 +29,13 @@ class SessionViewer(QWidget):
     track_changed = Signal(object)  # emits Track
     ref_selected = Signal(object)  # emits Lap (the reference lap object)
 
-    def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None, session_id: str = ""):
+    def __init__(self, source_session, session, parent=None, *, video_path: Path | None = None, session_id: str = "", source_type: str = ""):
         super().__init__(parent)
         self._source_session = source_session
         self._session = session
         self._session_id = session_id or getattr(source_session.metadata, 'filename', '') or ''
         self._video_path = video_path
+        self._source_type = source_type
         populate_sectors(self._session)
 
         from PySide6.QtWidgets import QApplication
@@ -65,6 +66,7 @@ class SessionViewer(QWidget):
         self._video.set_source_session(source_session)
         self._video.session_time_changed.connect(self.jump_to_time)
         self._video.video_offset_changed.connect(self._on_video_offset_changed)
+        self._video.video_path_changed.connect(self._on_video_path_changed)
 
         top_splitter.addWidget(self._video)
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
@@ -145,9 +147,8 @@ class SessionViewer(QWidget):
             self._update_plot()
             self._update_map_full()
 
-        # Auto-load video if provided (GoPro sessions)
-        if self._video_path and self._video_path.exists():
-            self._video.load_video(self._video_path, is_gopro_session=True)
+        # Video auto-load is handled by the caller (main.py) after construction
+        # to correctly distinguish between load-with-offset vs auto-sync cases.
 
 
     def _rebuild_lap_table(self):
@@ -353,6 +354,10 @@ class SessionViewer(QWidget):
                 self.jump_to_time(self._current_session_time + 5.0)
                 return True
         return super().eventFilter(obj, event)
+
+    def _on_video_path_changed(self, path):
+        """Update stored video path when user loads a new video."""
+        self._video_path = path
 
     def _on_video_offset_changed(self, offset):
         """Persist video path and offset when sync changes."""

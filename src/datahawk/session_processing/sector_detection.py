@@ -10,7 +10,7 @@ from datahawk.utils.gps_utils import intersection, interpolate_by_gps
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
 
-def detect_reference_lap_sector_split_times(session: Session) -> list[float]:
+def detect_master_lap_sector_split_times(session: Session) -> list[float]:
     """Detect times at which the master lap crosses each sector split line.
 
     Returns crossing times ordered by time of crossing.
@@ -100,7 +100,7 @@ def calculate_sector_times(reference_lap_sector_split_times: list[float], lap: L
 
 def populate_sectors(session: Session):
     """Populate sector_split_times and sector_times for all laps in the session."""
-    ref_split_times = detect_reference_lap_sector_split_times(session)
+    ref_split_times = detect_master_lap_sector_split_times(session)
 
     for lap in session.laps:
         if not ref_split_times:

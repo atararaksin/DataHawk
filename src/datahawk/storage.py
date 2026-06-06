@@ -163,6 +163,17 @@ def save_session_video(session_id: str, video_path: str, video_offset: float | N
     db.close()
 
 
+def delete_session(session_id: str) -> None:
+    """Delete a session from the database and its data file."""
+    path = get_session_file_path(session_id)
+    if path and path.exists():
+        path.unlink()
+    db = _get_db()
+    db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    db.commit()
+    db.close()
+
+
 def delete_track(track_name: str) -> None:
     """Delete all saved track data (SF line + sectors)."""
     db = _get_db()

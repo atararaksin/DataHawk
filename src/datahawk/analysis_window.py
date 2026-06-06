@@ -27,9 +27,9 @@ class AnalysisWindow(QMainWindow):
     def track_name(self) -> str:
         return self._track_name
 
-    def add_session(self, source_session, session, *, video_path=None, label: str = "", session_id: str = ""):
+    def add_session(self, source_session, session, *, video_path=None, label: str = "", session_id: str = "", source_type: str = ""):
         """Add a new SessionViewer tab. Returns the viewer."""
-        viewer = SessionViewer(source_session, session, video_path=video_path, session_id=session_id)
+        viewer = SessionViewer(source_session, session, video_path=video_path, session_id=session_id, source_type=source_type)
         viewer.track_changed.connect(self._on_track_changed)
         viewer.ref_selected.connect(self._on_ref_selected)
         tab_label = label or f"{session.date} {session.start_time}"

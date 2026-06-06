@@ -1,11 +1,11 @@
 """Session browser widget for the main window."""
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView,
+    QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QMessageBox,
 )
 
-from datahawk.storage import list_saved_sessions
+from datahawk.storage import list_saved_sessions, delete_session
 
 
 class SessionBrowser(QWidget):
@@ -24,6 +24,8 @@ class SessionBrowser(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.doubleClicked.connect(self._on_double_click)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_context_menu)
         layout.addWidget(self._table)
 
         self.refresh()
@@ -47,3 +49,20 @@ class SessionBrowser(QWidget):
         row = index.row()
         if 0 <= row < len(self._sessions):
             self.session_opened.emit(self._sessions[row]["id"])
+
+    def _on_context_menu(self, pos):
+        row = self._table.rowAt(pos.y())
+        if row < 0 or row >= len(self._sessions):
+            return
+        menu = QMenu(self)
+        delete_action = menu.addAction("Delete")
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if action == delete_action:
+            session = self._sessions[row]
+            reply = QMessageBox.question(
+                self, "Delete Session",
+                f"Delete '{session['filename']}'?",
+                QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                delete_session(session["id"])
+                self.refresh()
