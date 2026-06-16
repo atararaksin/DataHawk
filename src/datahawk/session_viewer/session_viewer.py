@@ -174,8 +174,13 @@ class SessionViewer(QWidget):
         if lap_idx != self._active_lap_idx:
             log.info(f"JUMP_TO_TIME lap change {self._active_lap_idx}->{lap_idx} at session_time={session_time:.3f}")
             self._active_lap_idx = lap_idx
+            t_plot = time.perf_counter()
             self._update_plot()
+            t_map = time.perf_counter()
+            log.info(f"  _update_plot took {((t_map - t_plot)*1000):.1f}ms")
             self._update_map_full()
+            t_after_map = time.perf_counter()
+            log.info(f"  _update_map_full took {((t_after_map - t_map)*1000):.1f}ms")
 
         # Position cursor
         self._graph.set_cursor_session_time(session_time)
@@ -401,6 +406,7 @@ class SessionViewer(QWidget):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
         ch_name = self._channel_names[self._combo.currentIndex()]
+        log.info(f"  _update_plot START (channel={ch_name}, lap={self._active_lap_idx})")
         t0 = time.perf_counter()
         self._graph.update_plot(
             session=self._session,
@@ -410,5 +416,4 @@ class SessionViewer(QWidget):
             diff_mode=self._diff_cb.isChecked(),
         )
         elapsed = (time.perf_counter() - t0) * 1000
-        if elapsed > 50:
-            log.warning(f"_update_plot took {elapsed:.1f}ms (channel={ch_name}, lap={self._active_lap_idx})")
+        log.info(f"  _update_plot END ({elapsed:.1f}ms)")
