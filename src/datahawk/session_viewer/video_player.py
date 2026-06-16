@@ -35,6 +35,7 @@ class VideoPlayer(QWidget):
         self._current_session_time = 0.0
         self._source_session: SourceSession | None = None
         self._is_mychron_session = False
+        self._seeking = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -122,10 +123,14 @@ class VideoPlayer(QWidget):
         pos_ms = int(video_s * 1000)
         state = self._player.playbackState()
         log.info(f"SEEK session_time={session_time:.3f} video_s={video_s:.3f} pos_ms={pos_ms} state={state} mediaStatus={self._player.mediaStatus()}")
+        # Suppress sync timer during programmatic seek to prevent feedback loop
+        self._seeking = True
         t0 = time.perf_counter()
         self._player.setPosition(pos_ms)
         elapsed = (time.perf_counter() - t0) * 1000
         log.info(f"SEEK setPosition returned in {elapsed:.1f}ms")
+        # Re-enable sync after a short delay to let the player actually seek
+        QTimer.singleShot(50, self._end_seek)
 
     def update_session_time(self, session_time: float):
         """Update the current session time (for sync toggle reference)."""
@@ -227,8 +232,13 @@ class VideoPlayer(QWidget):
         dur = self._player.duration()
         self._lbl_time.setText(f"{ms // 60000}:{(ms // 1000) % 60:02d} / {dur // 60000}:{(dur // 1000) % 60:02d}")
 
+    def _end_seek(self):
+        self._seeking = False
+
     def _emit_sync(self):
         if self._video_offset is None:
+            return
+        if self._seeking:
             return
         video_s = self._player.position() / 1000.0
         session_time = video_s - self._video_offset
