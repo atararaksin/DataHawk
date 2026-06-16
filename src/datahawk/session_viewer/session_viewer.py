@@ -144,6 +144,7 @@ class SessionViewer(QWidget):
 
         # Reference lap (set externally by AnalysisWindow)
         self._ref_lap = None
+        self._jumping = False
 
         # Select first lap
         self._active_lap_idx = 0
@@ -165,6 +166,10 @@ class SessionViewer(QWidget):
         """Jump to a given session time: select the active lap and place the cursor."""
         if not self._session.laps:
             return
+        # Prevent reentrant calls from sync timer during this method
+        if self._jumping:
+            return
+        self._jumping = True
 
         t0 = time.perf_counter()
         self._current_session_time = session_time
@@ -192,6 +197,7 @@ class SessionViewer(QWidget):
         elapsed = (time.perf_counter() - t0) * 1000
         if elapsed > 50:
             log.warning(f"JUMP_TO_TIME took {elapsed:.1f}ms (session_time={session_time:.3f})")
+        self._jumping = False
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
