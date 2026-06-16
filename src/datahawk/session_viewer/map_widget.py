@@ -125,9 +125,8 @@ class MapWidget(pg.PlotWidget):
             self._zoom = new_zoom
             self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
         elif new_zoom != self._zoom:
-            # Zoom would change — skip map update for this lap (out/in lap with wider bbox)
-            print(f"    SKIPPING map update (zoom mismatch)", file=sys.stderr, flush=True)
-            return
+            self._zoom = new_zoom
+            self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
 
         # Plot trajectories
         if cur_lats:
@@ -157,10 +156,20 @@ class MapWidget(pg.PlotWidget):
 
     def _reload_tiles(self, min_lat, max_lat, min_lon, max_lon):
         """Clear tile items and reload. Only called when zoom/bbox changes."""
-        for item in self._tile_items:
-            self.getPlotItem().scene().removeItem(item)
+        import time as _time
+        print(f"    _reload_tiles: removing {len(self._tile_items)} items", file=sys.stderr, flush=True)
+        t0 = _time.perf_counter()
+        scene = self.getPlotItem().scene()
+        for i, item in enumerate(self._tile_items):
+            scene.removeItem(item)
+            if i == 0:
+                t1 = _time.perf_counter()
+                print(f"    first removeItem took {((t1-t0)*1000):.1f}ms", file=sys.stderr, flush=True)
+        elapsed = (_time.perf_counter() - t0) * 1000
+        print(f"    all removeItem took {elapsed:.1f}ms", file=sys.stderr, flush=True)
         self._tile_items.clear()
         self.getViewBox().autoRange(padding=0)
+        print(f"    autoRange done", file=sys.stderr, flush=True)
         self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
 
     def set_session(self, session: Session):
