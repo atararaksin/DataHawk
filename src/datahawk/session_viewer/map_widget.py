@@ -120,16 +120,12 @@ class MapWidget(pg.PlotWidget):
 
         new_zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
         print(f"    zoom: current={self._zoom} new={new_zoom} tiles={len(self._tile_items)}", file=sys.stderr, flush=True)
-        if new_zoom != self._zoom:
-            # Zoom changed — must reload tiles
-            self._zoom = new_zoom
-            self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
-        elif not self._tile_items:
-            # First load — fetch tiles
+        if new_zoom != self._zoom and not self._tile_items:
+            # Only change zoom on first load (no tiles yet)
             self._zoom = new_zoom
             self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
-        else:
-            self._zoom = new_zoom
+        elif not self._tile_items:
+            self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
 
         # Plot trajectories
         if cur_lats:
