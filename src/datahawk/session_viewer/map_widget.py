@@ -116,8 +116,16 @@ class MapWidget(pg.PlotWidget):
         max_lon += lon_range * 0.15
 
         new_zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
-        need_tiles = (new_zoom != self._zoom or not self._tile_items)
-        self._zoom = new_zoom
+        if new_zoom != self._zoom:
+            # Zoom changed — must reload tiles
+            self._zoom = new_zoom
+            self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
+        elif not self._tile_items:
+            # First load — fetch tiles
+            self._zoom = new_zoom
+            self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
+        else:
+            self._zoom = new_zoom
 
         # Plot trajectories
         if cur_lats:
@@ -142,9 +150,6 @@ class MapWidget(pg.PlotWidget):
                 bx, by = self._to_plot(line.b.lat, line.b.lon)
                 item = self.plot([ax, bx], [ay, by], pen=pg.mkPen("w", width=2))
                 self._trajectory_items.append(item)
-
-        if need_tiles:
-            self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
 
     def _reload_tiles(self, min_lat, max_lat, min_lon, max_lon):
         """Clear tile items and reload. Only called when zoom/bbox changes."""
