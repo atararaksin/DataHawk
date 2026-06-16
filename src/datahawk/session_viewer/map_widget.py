@@ -153,9 +153,8 @@ class MapWidget(pg.PlotWidget):
 
     def _reload_tiles(self, min_lat, max_lat, min_lon, max_lon):
         """Clear tile items and reload. Only called when zoom/bbox changes."""
-        # Hide old tiles instead of removing from scene (removal is O(n) expensive)
         for item in self._tile_items:
-            item.setVisible(False)
+            self.getPlotItem().scene().removeItem(item)
         self._tile_items.clear()
         self.getViewBox().autoRange(padding=0)
         self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)

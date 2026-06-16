@@ -226,8 +226,12 @@ class SessionViewer(QWidget):
             return
         self._map_needs_redraw = False
         current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
+        t0 = time.perf_counter()
         self._map.set_track(self._session.track)
+        t1 = time.perf_counter()
         self._map.set_laps(current_lap, self._ref_lap)
+        t2 = time.perf_counter()
+        log.info(f"  _update_map_full: set_track={((t1-t0)*1000):.1f}ms set_laps={((t2-t1)*1000):.1f}ms")
 
     def jump_to_lap(self, lap_idx: int):
         """Jump to target lap at the same spatial position as current cursor."""
