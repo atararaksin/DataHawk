@@ -293,6 +293,7 @@ class MapWidget(pg.PlotWidget):
 
     def _load_tiles_async(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float):
         """Submit tile fetches to thread pool, poll for results via timer."""
+        import sys
         z = self._zoom
         px_left, px_top = _lat_lon_to_pixel(max_lat, min_lon, z)
         px_right, px_bottom = _lat_lon_to_pixel(min_lat, max_lon, z)
@@ -301,6 +302,9 @@ class MapWidget(pg.PlotWidget):
         tx_max = int(px_right // TILE_SIZE)
         ty_min = int(px_top // TILE_SIZE)
         ty_max = int(px_bottom // TILE_SIZE)
+
+        tile_count = (tx_max - tx_min + 1) * (ty_max - ty_min + 1)
+        print(f"    _load_tiles_async: z={z} grid=({tx_max-tx_min+1}x{ty_max-ty_min+1}) total={tile_count} tiles", file=sys.stderr, flush=True)
 
         self._pending_futures.clear()
         for ty in range(ty_min, ty_max + 1):
