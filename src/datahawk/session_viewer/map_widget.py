@@ -83,6 +83,7 @@ class MapWidget(pg.PlotWidget):
 
     def _update_trajectories(self):
         """Redraw only trajectory lines and track lines, preserving tiles."""
+        import sys; print("    _update_trajectories START", file=sys.stderr, flush=True)
         # Remove old trajectories and track lines (not tiles)
         for item in list(self._trajectory_items):
             self.removeItem(item)
@@ -90,11 +91,13 @@ class MapWidget(pg.PlotWidget):
         if self._cur_marker:
             self.removeItem(self._cur_marker)
             self._cur_marker = None
+        print("    _update_trajectories cleared old items", file=sys.stderr, flush=True)
 
         if self._current_lap is None:
             return
 
         cur_lats, cur_lons = self._get_raw_coords(self._current_lap)
+        print(f"    got cur coords: {len(cur_lats)} pts", file=sys.stderr, flush=True)
         all_lats, all_lons = list(cur_lats), list(cur_lons)
         ref_lats, ref_lons = [], []
         if self._ref_lap:
