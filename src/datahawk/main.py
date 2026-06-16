@@ -1,5 +1,6 @@
 """DataHawk main application entry point."""
 
+import logging
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -7,6 +8,16 @@ from PySide6.QtWidgets import (
     QFileDialog, QDialog, QVBoxLayout, QDialogButtonBox,
 )
 from PySide6.QtGui import QAction
+
+# Configure logging for debug
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s.%(msecs)03d [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stderr)],
+)
+# Quiet noisy loggers
+logging.getLogger("PySide6").setLevel(logging.WARNING)
 
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from datahawk.source.types import SourceSession
+
+log = logging.getLogger("datahawk.video_player")
 
 
 class VideoPlayer(QWidget):
@@ -115,7 +119,13 @@ class VideoPlayer(QWidget):
         if self._video_offset is None:
             return
         video_s = session_time + self._video_offset
-        self._player.setPosition(int(video_s * 1000))
+        pos_ms = int(video_s * 1000)
+        state = self._player.playbackState()
+        log.info(f"SEEK session_time={session_time:.3f} video_s={video_s:.3f} pos_ms={pos_ms} state={state} mediaStatus={self._player.mediaStatus()}")
+        t0 = time.perf_counter()
+        self._player.setPosition(pos_ms)
+        elapsed = (time.perf_counter() - t0) * 1000
+        log.info(f"SEEK setPosition returned in {elapsed:.1f}ms")
 
     def update_session_time(self, session_time: float):
         """Update the current session time (for sync toggle reference)."""
@@ -181,7 +191,9 @@ class VideoPlayer(QWidget):
             self._btn_sync.setChecked(False)
 
     def _toggle_play(self):
-        if self._player.playbackState() == QMediaPlayer.PlayingState:
+        state = self._player.playbackState()
+        log.info(f"TOGGLE_PLAY current_state={state} mediaStatus={self._player.mediaStatus()}")
+        if state == QMediaPlayer.PlayingState:
             self._player.pause()
             self._btn_play.setText("▶")
             if self._video_offset is not None:
@@ -220,4 +232,8 @@ class VideoPlayer(QWidget):
             return
         video_s = self._player.position() / 1000.0
         session_time = video_s - self._video_offset
+        state = self._player.playbackState()
+        media_status = self._player.mediaStatus()
+        if state != QMediaPlayer.PlayingState:
+            log.warning(f"SYNC_TIMER firing but player not playing: state={state} mediaStatus={media_status}")
         self.session_time_changed.emit(session_time)

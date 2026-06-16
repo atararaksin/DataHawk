@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import math
+import time
 from pathlib import Path
 from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QComboBox, QLabel,
@@ -21,6 +23,8 @@ from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
+
+log = logging.getLogger("datahawk.session_viewer")
 
 
 class SessionViewer(QWidget):
@@ -160,6 +164,7 @@ class SessionViewer(QWidget):
         if not self._session.laps:
             return
 
+        t0 = time.perf_counter()
         self._current_session_time = session_time
         self._video.update_session_time(session_time)
 
@@ -167,6 +172,7 @@ class SessionViewer(QWidget):
 
         # Select lap if changed
         if lap_idx != self._active_lap_idx:
+            log.info(f"JUMP_TO_TIME lap change {self._active_lap_idx}->{lap_idx} at session_time={session_time:.3f}")
             self._active_lap_idx = lap_idx
             self._update_plot()
             self._update_map_full()
@@ -176,6 +182,9 @@ class SessionViewer(QWidget):
 
         self._select_active_table_cell()
         self._update_map()
+        elapsed = (time.perf_counter() - t0) * 1000
+        if elapsed > 50:
+            log.warning(f"JUMP_TO_TIME took {elapsed:.1f}ms (session_time={session_time:.3f})")
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
@@ -241,8 +250,13 @@ class SessionViewer(QWidget):
         else:
             return
         session_time += 0.01
+        log.info(f"JUMP_TO_SECTOR lap={lap_idx} sector={sector_idx} session_time={session_time:.3f}")
+        t0 = time.perf_counter()
         self.jump_to_time(session_time)
+        t1 = time.perf_counter()
         self._video.seek_to_session_time(session_time)
+        t2 = time.perf_counter()
+        log.info(f"JUMP_TO_SECTOR done: jump_to_time={((t1-t0)*1000):.1f}ms seek_video={((t2-t1)*1000):.1f}ms")
     def _on_lap_clicked(self, event: LapTableLapClicked):
         """Handle lap click from table."""
         if event.lap_idx != self._active_lap_idx:
@@ -387,6 +401,7 @@ class SessionViewer(QWidget):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
         ch_name = self._channel_names[self._combo.currentIndex()]
+        t0 = time.perf_counter()
         self._graph.update_plot(
             session=self._session,
             lap_idx=self._active_lap_idx,
@@ -394,3 +409,6 @@ class SessionViewer(QWidget):
             ref_lap=self._ref_lap,
             diff_mode=self._diff_cb.isChecked(),
         )
+        elapsed = (time.perf_counter() - t0) * 1000
+        if elapsed > 50:
+            log.warning(f"_update_plot took {elapsed:.1f}ms (channel={ch_name}, lap={self._active_lap_idx})")
