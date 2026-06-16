@@ -156,7 +156,7 @@ class MapWidget(pg.PlotWidget):
 
     def _reload_tiles(self, min_lat, max_lat, min_lon, max_lon):
         """Clear tile items and reload. Only called when zoom/bbox changes."""
-        import time as _time
+        import sys, time as _time
         print(f"    _reload_tiles: removing {len(self._tile_items)} items", file=sys.stderr, flush=True)
         t0 = _time.perf_counter()
         scene = self.getPlotItem().scene()
