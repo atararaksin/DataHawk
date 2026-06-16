@@ -127,6 +127,7 @@ class MapWidget(pg.PlotWidget):
         elif new_zoom != self._zoom:
             self._zoom = new_zoom
             self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
+            print("    _reload_tiles returned", file=sys.stderr, flush=True)
 
         # Plot trajectories
         if cur_lats:
