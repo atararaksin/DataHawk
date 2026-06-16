@@ -118,6 +118,8 @@ class SessionViewer(QWidget):
         self._map = MapWidget()
         self._map.set_session(self._session)
         self._bottom_tabs.addTab(self._map, "Map")
+        self._map_needs_redraw = False
+        self._bottom_tabs.currentChanged.connect(self._on_bottom_tab_changed)
 
         bottom_layout.addWidget(self._bottom_tabs)
 
@@ -210,8 +212,19 @@ class SessionViewer(QWidget):
         """Update the satellite map position marker."""
         self._map.update_position(self._current_session_time)
 
+    def _on_bottom_tab_changed(self, index):
+        """Trigger deferred map redraw when switching to Map tab."""
+        if self._bottom_tabs.currentWidget() is self._map and self._map_needs_redraw:
+            self._update_map_full()
+
     def _update_map_full(self):
         """Full map redraw (tiles + trajectories). Call on lap/reference change."""
+        # Skip expensive redraw if map tab isn't visible
+        if self._bottom_tabs.currentWidget() is not self._map:
+            self._map_needs_redraw = True
+            log.info("  _update_map_full SKIPPED (tab not visible)")
+            return
+        self._map_needs_redraw = False
         current_lap = self._session.laps[self._active_lap_idx] if self._session.laps else None
         self._map.set_track(self._session.track)
         self._map.set_laps(current_lap, self._ref_lap)
