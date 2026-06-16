@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QEvent, Signal
+from PySide6.QtMultimedia import QMediaPlayer
 
 from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import build_session
@@ -209,7 +210,7 @@ class SessionViewer(QWidget):
             log.warning(f"JUMP_TO_TIME took {elapsed:.1f}ms (session_time={session_time:.3f})")
         self._jumping = False
         # Restart sync timer if player is actively playing
-        if self._video._video_offset is not None and self._video._player.playbackState() == self._video._player.PlayingState:
+        if self._video._video_offset is not None and self._video._player.playbackState() == QMediaPlayer.PlayingState:
             self._video._sync_timer.start()
 
     def _select_active_table_cell(self):
