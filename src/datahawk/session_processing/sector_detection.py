@@ -21,6 +21,9 @@ def detect_master_lap_sector_split_times(session: Session) -> list[float]:
     if not split_lines:
         return []
 
+    if session.best_lap_index is None or session.best_lap_index < 0 or session.best_lap_index >= len(session.laps):
+        return []
+
     master_lap = session.track.master_lap
     lats = master_lap.lats
     lons = master_lap.lons
@@ -100,6 +103,8 @@ def calculate_sector_times(reference_lap_sector_split_times: list[float], lap: L
 
 def populate_sectors(session: Session):
     """Populate sector_split_times and sector_times for all laps in the session."""
+    if not session.laps or not session.track:
+        return
     ref_split_times = detect_master_lap_sector_split_times(session)
 
     for lap in session.laps:
