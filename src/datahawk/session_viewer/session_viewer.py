@@ -185,6 +185,14 @@ class SessionViewer(QWidget):
             self._update_plot()
             t_map = time.perf_counter()
             log.info(f"  _update_plot took {((t_map - t_plot)*1000):.1f}ms")
+            # Debug: check lap data
+            lap = self._session.laps[lap_idx]
+            lat_ch = lap.channels.get("GPS Latitude")
+            lon_ch = lap.channels.get("GPS Longitude")
+            lat_count = len(lat_ch.samples) if lat_ch else 0
+            lon_count = len(lon_ch.samples) if lon_ch else 0
+            log.info(f"  LAP {lap_idx} GPS data: lat_samples={lat_count} lon_samples={lon_count} start={lap.lap_start_time:.3f}")
+            log.info("  ENTERING _update_map_full")
             self._update_map_full()
             t_after_map = time.perf_counter()
             log.info(f"  _update_map_full took {((t_after_map - t_map)*1000):.1f}ms")
@@ -225,6 +233,7 @@ class SessionViewer(QWidget):
 
     def _update_map_full(self):
         """Full map redraw (tiles + trajectories). Call on lap/reference change."""
+        import sys; print("  _update_map_full ENTERED", file=sys.stderr, flush=True)
         # Skip expensive redraw if map tab isn't visible
         if self._bottom_tabs.currentWidget() is not self._map:
             self._map_needs_redraw = True
