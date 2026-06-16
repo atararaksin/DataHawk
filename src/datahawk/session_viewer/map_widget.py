@@ -119,6 +119,7 @@ class MapWidget(pg.PlotWidget):
         max_lon += lon_range * 0.15
 
         new_zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
+        print(f"    zoom: current={self._zoom} new={new_zoom} tiles={len(self._tile_items)}", file=sys.stderr, flush=True)
         if new_zoom != self._zoom:
             # Zoom changed — must reload tiles
             self._zoom = new_zoom
@@ -132,9 +133,11 @@ class MapWidget(pg.PlotWidget):
 
         # Plot trajectories
         if cur_lats:
+            print(f"    plotting {len(cur_lats)} pts", file=sys.stderr, flush=True)
             cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
             item = self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
             self._trajectory_items.append(item)
+            print("    plot done", file=sys.stderr, flush=True)
 
         if ref_lats:
             ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
