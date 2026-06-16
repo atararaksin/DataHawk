@@ -167,9 +167,8 @@ class MapWidget(pg.PlotWidget):
         self._session = session
 
     def set_track(self, track: Track | None):
-        """Update track reference and redraw (for SF line + sector splits)."""
+        """Update track reference. Actual redraw happens in set_laps."""
         self._track = track
-        self._update_trajectories()
 
     def update_position(self, session_time: float):
         """Update the current position marker for a given session time."""
