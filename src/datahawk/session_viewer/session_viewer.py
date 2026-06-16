@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QEvent, Signal
+from PySide6.QtMultimedia import QMediaPlayer
 
 from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import build_session
@@ -138,6 +139,7 @@ class SessionViewer(QWidget):
 
         # Reference lap (set externally by AnalysisWindow)
         self._ref_lap = None
+        self._jumping = False
 
         # Select first lap
         self._active_lap_idx = 0
@@ -159,6 +161,10 @@ class SessionViewer(QWidget):
         """Jump to a given session time: select the active lap and place the cursor."""
         if not self._session.laps:
             return
+        if self._jumping:
+            return
+        self._jumping = True
+        self._video._sync_timer.stop()
 
         self._current_session_time = session_time
         self._video.update_session_time(session_time)
@@ -176,6 +182,10 @@ class SessionViewer(QWidget):
 
         self._select_active_table_cell()
         self._update_map()
+
+        self._jumping = False
+        if self._video._video_offset is not None and self._video._player.playbackState() == QMediaPlayer.PlayingState:
+            self._video._sync_timer.start()
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""

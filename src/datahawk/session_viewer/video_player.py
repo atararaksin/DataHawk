@@ -31,6 +31,7 @@ class VideoPlayer(QWidget):
         self._current_session_time = 0.0
         self._source_session: SourceSession | None = None
         self._is_mychron_session = False
+        self._seeking = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -115,7 +116,9 @@ class VideoPlayer(QWidget):
         if self._video_offset is None:
             return
         video_s = session_time + self._video_offset
+        self._seeking = True
         self._player.setPosition(int(video_s * 1000))
+        QTimer.singleShot(50, self._end_seek)
 
     def update_session_time(self, session_time: float):
         """Update the current session time (for sync toggle reference)."""
@@ -215,8 +218,13 @@ class VideoPlayer(QWidget):
         dur = self._player.duration()
         self._lbl_time.setText(f"{ms // 60000}:{(ms // 1000) % 60:02d} / {dur // 60000}:{(dur // 1000) % 60:02d}")
 
+    def _end_seek(self):
+        self._seeking = False
+
     def _emit_sync(self):
         if self._video_offset is None:
+            return
+        if self._seeking:
             return
         video_s = self._player.position() / 1000.0
         session_time = video_s - self._video_offset
