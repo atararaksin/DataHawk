@@ -120,12 +120,14 @@ class MapWidget(pg.PlotWidget):
 
         new_zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
         print(f"    zoom: current={self._zoom} new={new_zoom} tiles={len(self._tile_items)}", file=sys.stderr, flush=True)
-        if new_zoom != self._zoom and not self._tile_items:
-            # Only change zoom on first load (no tiles yet)
+        if not self._tile_items:
+            # First load — set zoom and fetch tiles
             self._zoom = new_zoom
             self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
-        elif not self._tile_items:
-            self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
+        elif new_zoom != self._zoom:
+            # Zoom would change — skip map update for this lap (out/in lap with wider bbox)
+            print(f"    SKIPPING map update (zoom mismatch)", file=sys.stderr, flush=True)
+            return
 
         # Plot trajectories
         if cur_lats:
