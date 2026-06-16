@@ -61,6 +61,8 @@ class MapWidget(pg.PlotWidget):
         self.setMenuEnabled(False)
         self.getViewBox().setBackgroundColor("k")
         self._tile_cache: dict[tuple[int, int, int], QPixmap] = {}
+        self._tile_items: list[QGraphicsPixmapItem] = []
+        self._trajectory_items: list = []
         self._zoom = 17
         self._current_lap: Lap | None = None
         self._ref_lap: Lap | None = None
@@ -74,10 +76,83 @@ class MapWidget(pg.PlotWidget):
         self._tile_timer.timeout.connect(self._check_tile_futures)
 
     def set_laps(self, current_lap: Lap | None, ref_lap: Lap | None):
-        """Full redraw: trajectories immediately, tiles async."""
+        """Update trajectories without clearing tiles."""
         self._current_lap = current_lap
         self._ref_lap = ref_lap
-        self._full_redraw()
+        self._update_trajectories()
+
+    def _update_trajectories(self):
+        """Redraw only trajectory lines and track lines, preserving tiles."""
+        # Remove old trajectories and track lines (not tiles)
+        for item in list(self._trajectory_items):
+            self.removeItem(item)
+        self._trajectory_items.clear()
+        if self._cur_marker:
+            self.removeItem(self._cur_marker)
+            self._cur_marker = None
+
+        if self._current_lap is None:
+            return
+
+        cur_lats, cur_lons = self._get_raw_coords(self._current_lap)
+        all_lats, all_lons = list(cur_lats), list(cur_lons)
+        ref_lats, ref_lons = [], []
+        if self._ref_lap:
+            ref_lats, ref_lons = self._get_raw_coords(self._ref_lap)
+            all_lats.extend(ref_lats)
+            all_lons.extend(ref_lons)
+
+        if len(all_lats) < 2:
+            return
+
+        # Check if we need new tiles (bounding box changed significantly)
+        min_lat, max_lat = min(all_lats), max(all_lats)
+        min_lon, max_lon = min(all_lons), max(all_lons)
+        lat_range = max_lat - min_lat or 0.001
+        lon_range = max_lon - min_lon or 0.001
+        min_lat -= lat_range * 0.15
+        max_lat += lat_range * 0.15
+        min_lon -= lon_range * 0.15
+        max_lon += lon_range * 0.15
+
+        new_zoom = self._fit_zoom(min_lat, max_lat, min_lon, max_lon)
+        need_tiles = (new_zoom != self._zoom or not self._tile_items)
+        self._zoom = new_zoom
+
+        # Plot trajectories
+        if cur_lats:
+            cur_pts = [self._to_plot(lat, lon) for lat, lon in zip(cur_lats, cur_lons)]
+            item = self.plot([p[0] for p in cur_pts], [p[1] for p in cur_pts], pen=pg.mkPen("y", width=2))
+            self._trajectory_items.append(item)
+
+        if ref_lats:
+            ref_pts = [self._to_plot(lat, lon) for lat, lon in zip(ref_lats, ref_lons)]
+            item = self.plot([p[0] for p in ref_pts], [p[1] for p in ref_pts], pen=pg.mkPen("r", width=2))
+            self._trajectory_items.append(item)
+
+        # Draw SF line and sector split lines
+        if self._track:
+            sf = self._track.sf_line
+            ax, ay = self._to_plot(sf.a.lat, sf.a.lon)
+            bx, by = self._to_plot(sf.b.lat, sf.b.lon)
+            item = self.plot([ax, bx], [ay, by], pen=pg.mkPen("g", width=2))
+            self._trajectory_items.append(item)
+            for line in self._track.sector_split_lines:
+                ax, ay = self._to_plot(line.a.lat, line.a.lon)
+                bx, by = self._to_plot(line.b.lat, line.b.lon)
+                item = self.plot([ax, bx], [ay, by], pen=pg.mkPen("w", width=2))
+                self._trajectory_items.append(item)
+
+        if need_tiles:
+            self._reload_tiles(min_lat, max_lat, min_lon, max_lon)
+
+    def _reload_tiles(self, min_lat, max_lat, min_lon, max_lon):
+        """Clear tile items and reload. Only called when zoom/bbox changes."""
+        for item in self._tile_items:
+            self.getPlotItem().scene().removeItem(item)
+        self._tile_items.clear()
+        self.getViewBox().autoRange(padding=0)
+        self._load_tiles_async(min_lat, max_lat, min_lon, max_lon)
 
     def set_session(self, session: Session):
         """Set session for temporal index lookups."""
@@ -86,7 +161,7 @@ class MapWidget(pg.PlotWidget):
     def set_track(self, track: Track | None):
         """Update track reference and redraw (for SF line + sector splits)."""
         self._track = track
-        self._full_redraw()
+        self._update_trajectories()
 
     def update_position(self, session_time: float):
         """Update the current position marker for a given session time."""
@@ -136,9 +211,11 @@ class MapWidget(pg.PlotWidget):
         return valid_lats, valid_lons
 
     def _full_redraw(self):
-        """Redraw trajectories immediately, load tiles in background."""
+        """Full clear and redraw. Only for initial load or zoom change."""
         self.clear()
         self._cur_marker = None
+        self._tile_items.clear()
+        self._trajectory_items.clear()
 
         if self._current_lap is None:
             return
@@ -246,6 +323,7 @@ class MapWidget(pg.PlotWidget):
         item.setPos(tx * TILE_SIZE, -((ty + 1) * TILE_SIZE))
         item.setZValue(-1)
         self.addItem(item)
+        self._tile_items.append(item)
 
     def _fit_zoom(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> int:
         """Find zoom where bounding box fits in ~4x4 tiles."""
