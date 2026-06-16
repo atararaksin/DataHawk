@@ -170,6 +170,8 @@ class SessionViewer(QWidget):
         if self._jumping:
             return
         self._jumping = True
+        # Stop sync timer to prevent Qt event processing from triggering it mid-update
+        self._video._sync_timer.stop()
 
         t0 = time.perf_counter()
         self._current_session_time = session_time
@@ -206,6 +208,9 @@ class SessionViewer(QWidget):
         if elapsed > 50:
             log.warning(f"JUMP_TO_TIME took {elapsed:.1f}ms (session_time={session_time:.3f})")
         self._jumping = False
+        # Restart sync timer if player is actively playing
+        if self._video._video_offset is not None and self._video._player.playbackState() == self._video._player.PlayingState:
+            self._video._sync_timer.start()
 
     def _select_active_table_cell(self):
         """Highlight the current sector cell of the current lap in the table."""
