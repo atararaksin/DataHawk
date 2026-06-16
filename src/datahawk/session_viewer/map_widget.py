@@ -207,6 +207,10 @@ class MapWidget(pg.PlotWidget):
         ty_min = int(px_top // TILE_SIZE)
         ty_max = int(px_bottom // TILE_SIZE)
 
+        # Guard against GPS outliers blowing up the bounding box
+        if (tx_max - tx_min + 1) * (ty_max - ty_min + 1) > 36:
+            return
+
         self._pending_futures.clear()
         for ty in range(ty_min, ty_max + 1):
             for tx in range(tx_min, tx_max + 1):
