@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QToolBar, QMessageBox,
     QFileDialog, QDialog, QVBoxLayout, QDialogButtonBox,
 )
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 
 from datahawk.import_dialog import ImportDialog
@@ -205,9 +206,11 @@ class MainWindow(QMainWindow):
     def _get_or_create_analysis_window(self, track_name: str) -> AnalysisWindow:
         """Get existing or create new AnalysisWindow for a track."""
         window = self._analysis_windows.get(track_name)
-        if window and window.isVisible():
+        if window:
             return window
         window = AnalysisWindow(track_name)
+        window.setAttribute(Qt.WA_DeleteOnClose)
+        window.destroyed.connect(lambda: self._analysis_windows.pop(track_name, None))
         self._analysis_windows[track_name] = window
         return window
 
