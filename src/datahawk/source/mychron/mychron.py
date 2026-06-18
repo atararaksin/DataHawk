@@ -169,8 +169,12 @@ def _do_setup(sock):
     _recv(sock, idle=0.1, max_t=2.0)
 
 
-def download_session(session_name: str, expected_size: int = 0, ip: str = DEVICE_IP) -> bytes:
-    """Download a session file from the device. Returns raw .xrz bytes."""
+def download_session(session_name: str, expected_size: int = 0, ip: str = DEVICE_IP,
+                     progress_cb=None) -> bytes:
+    """Download a session file from the device. Returns raw .xrz bytes.
+    
+    progress_cb: optional callable(bytes_downloaded, expected_size) called per chunk.
+    """
     filepath = f"1:/mem/{session_name}"
     if not filepath.endswith(".xrz"):
         filepath += ".xrz"
@@ -196,6 +200,8 @@ def download_session(session_name: str, expected_size: int = 0, ip: str = DEVICE
         # Frame body has 4 bytes offset prefix, then payload
         if len(frame) > 4:
             clean.extend(frame[4:])
+        if progress_cb:
+            progress_cb(len(clean), expected_size)
         # Full chunk = CHUNK_SIZE payload (65472 - 4 offset bytes = 65468 data bytes)
         # ACK immediately if it's a full-size frame
         if len(frame) >= CHUNK_SIZE:

@@ -29,7 +29,7 @@ class _ListWorker(QThread):
 
 
 class _DownloadWorker(QThread):
-    progress = Signal(int, int)
+    progress = Signal(int)  # 0-10000 (permyriad for smooth progress)
     finished = Signal(int)
     error = Signal(str)
 
@@ -42,10 +42,21 @@ class _DownloadWorker(QThread):
     def run(self):
         try:
             count = 0
+            n = len(self._sessions)
             track_created = False
             for i, s in enumerate(self._sessions):
-                self.progress.emit(i + 1, len(self._sessions))
-                data = download_session(s.name, expected_size=s.size)
+                # Each session gets an equal slice of the progress bar
+                base = int(i * 10000 / n)
+                span = int(10000 / n)
+
+                def on_chunk(downloaded, expected, _base=base, _span=span):
+                    if expected > 0:
+                        frac = min(downloaded / expected, 1.0)
+                    else:
+                        frac = 0.5  # unknown size, show half
+                    self.progress.emit(_base + int(frac * _span))
+
+                data = download_session(s.name, expected_size=s.size, progress_cb=on_chunk)
                 if data and len(data) > 200:
                     # Create track from first session if it doesn't exist yet
                     if not track_created and not load_track(self._track_name):
@@ -197,7 +208,7 @@ class ImportDialog(QDialog):
         self._refresh_btn.setEnabled(False)
         self._table.setEnabled(False)
         self._driver_selector.setEnabled(False)
-        self._progress.setRange(0, len(selected))
+        self._progress.setRange(0, 10000)
         self._progress.setValue(0)
         self._progress.show()
         self._status.setText("Downloading...")
@@ -208,9 +219,10 @@ class ImportDialog(QDialog):
         self._dl_worker.error.connect(self._on_dl_error)
         self._dl_worker.start()
 
-    def _on_dl_progress(self, current: int, total: int):
-        self._progress.setValue(current)
-        self._status.setText(f"Downloading {current}/{total}...")
+    def _on_dl_progress(self, value: int):
+        self._progress.setValue(value)
+        pct = value * 100 // 10000
+        self._status.setText(f"Downloading... {pct}%")
 
     def _on_dl_done(self, count: int):
         self._imported_count = count
