@@ -95,6 +95,34 @@ def _recv(sock, idle=0.3, max_t=5.0):
     return bytes(data)
 
 
+def _recv_exact(sock, n: int, timeout: float = 10.0) -> bytes:
+    """Read exactly n bytes from socket."""
+    data = bytearray()
+    sock.settimeout(timeout)
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            break
+        data.extend(chunk)
+    return bytes(data)
+
+
+def _recv_frame(sock, timeout: float = 10.0) -> bytes | None:
+    """Read one STCP frame, return the body (without header/footer). None on timeout."""
+    # Header: <hSTCP (6) + body_len (4) + \x00> (2) = 12 bytes
+    try:
+        hdr = _recv_exact(sock, 12, timeout)
+    except socket.timeout:
+        return None
+    if len(hdr) < 12 or hdr[:6] != b"<hSTCP":
+        return None
+    body_len = struct.unpack_from("<I", hdr, 6)[0]
+    body = _recv_exact(sock, body_len, timeout)
+    # Footer: <STCP (5) + checksum (2) + > (1) = 8 bytes
+    _recv_exact(sock, 8, timeout)
+    return body
+
+
 def check_device(ip: str = DEVICE_IP) -> bool:
     """Return True if device responds to UDP keepalive."""
     ka = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -153,39 +181,33 @@ def download_session(session_name: str, expected_size: int = 0, ip: str = DEVICE
     _do_setup(sock)
 
     sock.sendall(_build_download_cmd(filepath))
+    # First response is metadata/ack from device
     _recv(sock, idle=0.5, max_t=5.0)
 
     sock.sendall(bytes.fromhex(ACK))
 
-    all_data = bytearray()
+    # Frame-aware download: read complete frames and ACK immediately
+    clean = bytearray()
     chunk_num = 1
     while True:
-        chunk = _recv(sock, idle=2.0, max_t=30.0)
-        if not chunk:
+        frame = _recv_frame(sock, timeout=10.0)
+        if frame is None:
             break
-        all_data.extend(chunk)
-        if expected_size and len(all_data) >= expected_size + 500:
+        # Frame body has 4 bytes offset prefix, then payload
+        if len(frame) > 4:
+            clean.extend(frame[4:])
+        # Full chunk = CHUNK_SIZE payload (65472 - 4 offset bytes = 65468 data bytes)
+        # ACK immediately if it's a full-size frame
+        if len(frame) >= CHUNK_SIZE:
+            sock.sendall(_build_chunk_ack(chunk_num))
+            chunk_num += 1
+        else:
+            # Short frame = last chunk, we're done
             break
-        if len(chunk) < 30000:
+        if expected_size and len(clean) >= expected_size:
             break
-        sock.sendall(_build_chunk_ack(chunk_num))
-        chunk_num += 1
 
     sock.close()
-
-    # Parse STCP frames
-    raw = bytes(all_data)
-    clean = bytearray()
-    pos = 0
-    while pos < len(raw):
-        if pos + 12 > len(raw) or raw[pos:pos + 6] != b"<hSTCP":
-            break
-        body_len = struct.unpack_from("<I", raw, pos + 6)[0]
-        data_start = pos + 12 + 4
-        data_end = pos + 12 + body_len
-        clean.extend(raw[data_start:data_end])
-        pos = data_end + 8
-
     return bytes(clean)
 
 
