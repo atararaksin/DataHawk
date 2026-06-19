@@ -20,6 +20,7 @@ class AnalysisWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setTabsClosable(True)
         self._tabs.tabCloseRequested.connect(self._close_tab)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         self.setCentralWidget(self._tabs)
         self._ref_lap = None
 
@@ -62,6 +63,14 @@ class AnalysisWindow(QMainWindow):
         for i in range(self._tabs.count()):
             viewer: SessionViewer = self._tabs.widget(i)
             viewer.set_reference_lap(lap)
+
+    def _on_tab_changed(self, index: int):
+        """Pause video on all non-active tabs."""
+        for i in range(self._tabs.count()):
+            if i != index:
+                viewer: SessionViewer = self._tabs.widget(i)
+                viewer._video._player.pause()
+                viewer._video._sync_timer.stop()
 
     def _close_tab(self, index: int):
         viewer: SessionViewer = self._tabs.widget(index)
