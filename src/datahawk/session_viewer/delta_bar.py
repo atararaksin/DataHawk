@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QColor, QFont
 
-from datahawk.source.channel_constants import MASTER_CLK
+from datahawk.source.channel_constants import LAP_TIME
 from datahawk.types import Session, Lap
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
 
@@ -31,9 +31,9 @@ class DeltaBar(QWidget):
             return
 
         cur_mc = get_channel_value_in_another_lap_with_interpolation(
-            session, session_time, current_lap, MASTER_CLK)
+            session, session_time, current_lap, LAP_TIME)
         ref_mc = get_channel_value_in_another_lap_with_interpolation(
-            session, session_time, ref_lap, MASTER_CLK)
+            session, session_time, ref_lap, LAP_TIME)
 
         if math.isnan(cur_mc) or math.isnan(ref_mc):
             self._visible = False
