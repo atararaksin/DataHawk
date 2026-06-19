@@ -33,6 +33,8 @@ class TelemetryGraph(pg.PlotWidget):
 
     def wheelEvent(self, event):
         """Forward wheel events to parent scroll area instead of zooming."""
+        if not hasattr(self, '_cursor'):
+            return super().wheelEvent(event)
         event.ignore()
 
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
