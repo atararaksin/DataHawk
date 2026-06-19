@@ -135,11 +135,6 @@ class SessionViewer(QWidget):
         if self._session.laps:
             self._channel_names = sorted(self._session.laps[0].channels.keys())
 
-        # Default graph: GPS Speed
-        self._add_graph_panel(default_channel=GPS_SPEED)
-
-        # Connections (none for combo -- handled per-panel)
-
         # Reference lap (set externally by AnalysisWindow)
         self._ref_lap = None
         self._jumping = False
@@ -147,6 +142,10 @@ class SessionViewer(QWidget):
         # Select first lap
         self._active_lap_idx = 0
         self._current_session_time = 0.0
+
+        # Default graph: GPS Speed
+        self._add_graph_panel(default_channel=GPS_SPEED)
+
         if self._session.laps:
             self.jump_to_time(self._session.laps[0].lap_start_time)
             self._update_plot()
