@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QVBoxLayout, QWidget, QComboBox, QLabel,
+    QVBoxLayout, QWidget,
     QHBoxLayout, QSplitter,
-    QPushButton, QCheckBox,
+    QPushButton,
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QEvent, Signal
@@ -20,7 +20,8 @@ from datahawk.session_processing import populate_sectors
 from datahawk.storage import delete_track
 from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
-from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
+from datahawk.session_viewer.telemetry_graph import GraphClicked
+from datahawk.session_viewer.graph_panel import GraphPanel
 from datahawk.session_viewer.video_player import VideoPlayer
 from datahawk.session_viewer.delta_bar import DeltaBar
 
@@ -81,43 +82,39 @@ class SessionViewer(QWidget):
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
         top_splitter.setStretchFactor(1, 1)  # video takes remaining space
 
-        # === Bottom section (1/3 height): channel selector + graph ===
+        # === Bottom section (1/3 height): graphs + map ===
         bottom = QWidget()
         bottom_layout = QVBoxLayout(bottom)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Channel selector and reference lap
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Channel:"))
-        self._combo = QComboBox()
-        self._combo.setMinimumWidth(250)
-        top_row.addWidget(self._combo)
-        self._diff_cb = QCheckBox("Diff")
-        self._diff_cb.stateChanged.connect(self._update_plot)
-        top_row.addWidget(self._diff_cb)
+        # Track controls row
+        controls_row = QHBoxLayout()
         self._btn_sector = QPushButton("+ Sector")
         self._btn_sector.clicked.connect(self._add_sector_split)
-        top_row.addWidget(self._btn_sector)
+        controls_row.addWidget(self._btn_sector)
         self._btn_rm_sector = QPushButton("- Sector")
         self._btn_rm_sector.clicked.connect(self._remove_sector_split)
-        top_row.addWidget(self._btn_rm_sector)
+        controls_row.addWidget(self._btn_rm_sector)
         self._btn_clear_track = QPushButton("Clear")
         self._btn_clear_track.clicked.connect(self._clear_track)
-        top_row.addWidget(self._btn_clear_track)
+        controls_row.addWidget(self._btn_clear_track)
         self._btn_replace_sf = QPushButton("Replace SF")
         self._btn_replace_sf.clicked.connect(self._replace_sf_line)
-        top_row.addWidget(self._btn_replace_sf)
-        top_row.addStretch()
-        bottom_layout.addLayout(top_row)
+        controls_row.addWidget(self._btn_replace_sf)
+        self._btn_add_graph = QPushButton("+ Graph")
+        self._btn_add_graph.clicked.connect(self._add_graph_panel)
+        controls_row.addWidget(self._btn_add_graph)
+        controls_row.addStretch()
+        bottom_layout.addLayout(controls_row)
 
         # Graph and Map in tabs
         self._bottom_tabs = QTabWidget()
         self._bottom_tabs.setTabPosition(QTabWidget.South)
 
-        # Plot widget
-        self._graph = TelemetryGraph()
-        self._graph.clicked.connect(self._on_graph_click)
-        self._bottom_tabs.addTab(self._graph, "Graph")
+        # Multi-graph container
+        self._graph_splitter = QSplitter(Qt.Vertical)
+        self._graph_panels: list[GraphPanel] = []
+        self._bottom_tabs.addTab(self._graph_splitter, "Graph")
 
         # Satellite map widget
         self._map = MapWidget()
@@ -133,17 +130,15 @@ class SessionViewer(QWidget):
         vsplitter.setSizes([500, 250])
         main_layout.addWidget(vsplitter)
 
-        # Populate channel dropdown
+        # Populate channel list and create default graph panel
         self._channel_names: list[str] = []
         if self._session.laps:
-            for name in sorted(self._session.laps[0].channels.keys()):
-                self._combo.addItem(name)
-                self._channel_names.append(name)
-            if GPS_SPEED in self._channel_names:
-                self._combo.setCurrentIndex(self._channel_names.index(GPS_SPEED))
+            self._channel_names = sorted(self._session.laps[0].channels.keys())
 
-        # Connections
-        self._combo.currentIndexChanged.connect(self._update_plot)
+        # Default graph: GPS Speed
+        self._add_graph_panel(default_channel=GPS_SPEED)
+
+        # Connections (none for combo -- handled per-panel)
 
         # Reference lap (set externally by AnalysisWindow)
         self._ref_lap = None
@@ -185,8 +180,9 @@ class SessionViewer(QWidget):
             self._update_plot()
             self._update_map_full()
 
-        # Position cursor
-        self._graph.set_cursor_session_time(session_time)
+        # Position cursor on all graphs
+        for panel in self._graph_panels:
+            panel.set_cursor_session_time(session_time)
 
         # Update delta bar
         if self._active_lap_idx < len(self._session.laps):
@@ -277,9 +273,38 @@ class SessionViewer(QWidget):
         self.jump_to_sector(event.lap_idx, event.sector_idx)
 
     def _on_graph_click(self, event: GraphClicked):
-        """Handle click on the graph to seek to that time."""
+        """Handle click on any graph to seek to that time."""
         self.jump_to_time(event.session_time)
         self._video.seek_to_session_time(event.session_time)
+
+    def _add_graph_panel(self, default_channel: str = ""):
+        """Add a new graph panel to the splitter."""
+        if not default_channel and self._channel_names:
+            default_channel = self._channel_names[0]
+        panel = GraphPanel(self._channel_names, default_channel)
+        panel.clicked.connect(self._on_graph_click)
+        panel.remove_requested.connect(self._remove_graph_panel)
+        self._graph_panels.append(panel)
+        self._graph_splitter.addWidget(panel)
+        self._update_remove_buttons()
+        # Draw initial plot
+        if self._session.laps:
+            panel.update_plot(session=self._session, lap_idx=self._active_lap_idx, ref_lap=self._ref_lap)
+
+    def _remove_graph_panel(self, panel: GraphPanel):
+        """Remove a graph panel (minimum 1 must remain)."""
+        if len(self._graph_panels) <= 1:
+            return
+        self._graph_panels.remove(panel)
+        panel.setParent(None)
+        panel.deleteLater()
+        self._update_remove_buttons()
+
+    def _update_remove_buttons(self):
+        """Show/hide remove buttons based on panel count."""
+        single = len(self._graph_panels) == 1
+        for p in self._graph_panels:
+            p.set_remove_visible(not single)
 
     def _on_set_ref_clicked(self):
         """Set current lap as the reference lap."""
@@ -410,11 +435,9 @@ class SessionViewer(QWidget):
     def _update_plot(self, *_args):
         if not self._channel_names or self._active_lap_idx >= len(self._session.laps):
             return
-        ch_name = self._channel_names[self._combo.currentIndex()]
-        self._graph.update_plot(
-            session=self._session,
-            lap_idx=self._active_lap_idx,
-            channel_name=ch_name,
-            ref_lap=self._ref_lap,
-            diff_mode=self._diff_cb.isChecked(),
-        )
+        for panel in self._graph_panels:
+            panel.update_plot(
+                session=self._session,
+                lap_idx=self._active_lap_idx,
+                ref_lap=self._ref_lap,
+            )
