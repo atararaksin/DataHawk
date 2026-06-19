@@ -31,6 +31,10 @@ class TelemetryGraph(pg.PlotWidget):
         self.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_click)
 
+    def wheelEvent(self, event):
+        """Forward wheel events to parent scroll area instead of zooming."""
+        event.ignore()
+
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
         self.addItem(self._cursor)
         self._lap_start_time = 0.0
