@@ -22,6 +22,7 @@ from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.session_viewer.video_player import VideoPlayer
+from datahawk.session_viewer.delta_bar import DeltaBar
 
 
 class SessionViewer(QWidget):
@@ -62,14 +63,21 @@ class SessionViewer(QWidget):
         table_container.setFixedWidth(400)
         top_splitter.addWidget(table_container)
 
-        # Video player
+        # Video player + delta bar
+        video_container = QWidget()
+        video_layout = QVBoxLayout(video_container)
+        video_layout.setContentsMargins(0, 0, 0, 0)
+        video_layout.setSpacing(0)
         self._video = VideoPlayer()
         self._video.set_source_session(source_session)
         self._video.session_time_changed.connect(self.jump_to_time)
         self._video.video_offset_changed.connect(self._on_video_offset_changed)
         self._video.video_path_changed.connect(self._on_video_path_changed)
+        video_layout.addWidget(self._video, 1)
+        self._delta_bar = DeltaBar()
+        video_layout.addWidget(self._delta_bar)
 
-        top_splitter.addWidget(self._video)
+        top_splitter.addWidget(video_container)
         top_splitter.setStretchFactor(0, 0)  # table doesn't stretch
         top_splitter.setStretchFactor(1, 1)  # video takes remaining space
 
@@ -179,6 +187,12 @@ class SessionViewer(QWidget):
 
         # Position cursor
         self._graph.set_cursor_session_time(session_time)
+
+        # Update delta bar
+        if self._active_lap_idx < len(self._session.laps):
+            self._delta_bar.update_delta(
+                self._session, session_time,
+                self._session.laps[self._active_lap_idx], self._ref_lap)
 
         self._select_active_table_cell()
         self._update_map()
