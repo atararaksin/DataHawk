@@ -6,7 +6,8 @@ import math
 from dataclasses import dataclass
 
 import pyqtgraph as pg
-from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QLabel
+from PySide6.QtCore import Signal, Qt, QEvent
 
 from datahawk.types import Session, Lap
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
@@ -31,19 +32,11 @@ class TelemetryGraph(pg.PlotWidget):
         self.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_click)
 
-    def wheelEvent(self, event):
-        """Forward wheel events to parent scroll area instead of zooming."""
-        if not hasattr(self, '_cursor'):
-            return super().wheelEvent(event)
-        event.ignore()
-
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
         self.addItem(self._cursor)
         self._lap_start_time = 0.0
 
         # Current value label (bottom-left overlay, doesn't affect graph range)
-        from PySide6.QtWidgets import QLabel
-        from PySide6.QtCore import Qt
         self._value_label = QLabel(self)
         self._value_label.setStyleSheet("color: yellow; background: transparent; font-size: 12px; padding: 4px;")
         self._value_label.setAttribute(Qt.WA_TransparentForMouseEvents)

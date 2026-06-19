@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QCheckBox
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QEvent
 
 from datahawk.session_viewer.telemetry_graph import TelemetryGraph, GraphClicked
 from datahawk.types import Session
@@ -50,6 +50,7 @@ class GraphPanel(QWidget):
 
         self._graph = TelemetryGraph()
         self._graph.clicked.connect(self.clicked.emit)
+        self._graph.viewport().installEventFilter(self)
         layout.addWidget(self._graph)
 
         # Plot state
@@ -88,3 +89,12 @@ class GraphPanel(QWidget):
 
     def _on_channel_changed(self, *_):
         self._redraw()
+
+    def eventFilter(self, obj, event):
+        """Intercept wheel events on the graph viewport so scroll area receives them."""
+        if event.type() == QEvent.Wheel:
+            # Skip the graph's wheel handling entirely — scroll area will get it
+            from PySide6.QtWidgets import QApplication
+            QApplication.sendEvent(self, event)
+            return True
+        return super().eventFilter(obj, event)
