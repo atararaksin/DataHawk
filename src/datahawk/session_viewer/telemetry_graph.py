@@ -66,6 +66,7 @@ class TelemetryGraph(pg.PlotWidget):
                     ref_lap=None, diff_mode: bool):
         """Redraw the graph for the given lap/channel/reference configuration."""
         self.clear()
+        self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
         self.addItem(self._cursor)
 
         if lap_idx >= len(session.laps):
