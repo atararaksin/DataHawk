@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
     QHBoxLayout, QSplitter,
     QPushButton,
-    QTabWidget,
+    QTabWidget, QScrollArea,
 )
 from PySide6.QtCore import Qt, QEvent, Signal
 from PySide6.QtMultimedia import QMediaPlayer
@@ -111,10 +111,17 @@ class SessionViewer(QWidget):
         self._bottom_tabs = QTabWidget()
         self._bottom_tabs.setTabPosition(QTabWidget.South)
 
-        # Multi-graph container
-        self._graph_splitter = QSplitter(Qt.Vertical)
+        # Multi-graph container (scrollable)
+        self._graph_scroll = QScrollArea()
+        self._graph_scroll.setWidgetResizable(True)
+        self._graph_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._graph_container = QWidget()
+        self._graph_layout = QVBoxLayout(self._graph_container)
+        self._graph_layout.setContentsMargins(0, 0, 0, 0)
+        self._graph_layout.setSpacing(4)
+        self._graph_scroll.setWidget(self._graph_container)
         self._graph_panels: list[GraphPanel] = []
-        self._bottom_tabs.addTab(self._graph_splitter, "Graph")
+        self._bottom_tabs.addTab(self._graph_scroll, "Graph")
 
         # Satellite map widget
         self._map = MapWidget()
@@ -277,14 +284,15 @@ class SessionViewer(QWidget):
         self._video.seek_to_session_time(event.session_time)
 
     def _add_graph_panel(self, default_channel: str = ""):
-        """Add a new graph panel to the splitter."""
+        """Add a new graph panel to the scroll area."""
         if not default_channel and self._channel_names:
             default_channel = self._channel_names[0]
         panel = GraphPanel(self._channel_names, default_channel)
+        panel.setMinimumHeight(200)
         panel.clicked.connect(self._on_graph_click)
         panel.remove_requested.connect(self._remove_graph_panel)
         self._graph_panels.append(panel)
-        self._graph_splitter.addWidget(panel)
+        self._graph_layout.addWidget(panel)
         self._update_remove_buttons()
         # Draw initial plot
         if self._session.laps:
@@ -295,7 +303,7 @@ class SessionViewer(QWidget):
         if len(self._graph_panels) <= 1:
             return
         self._graph_panels.remove(panel)
-        panel.setParent(None)
+        self._graph_layout.removeWidget(panel)
         panel.deleteLater()
         self._update_remove_buttons()
 
