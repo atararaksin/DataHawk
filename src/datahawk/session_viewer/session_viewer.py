@@ -115,6 +115,7 @@ class SessionViewer(QWidget):
         self._graph_scroll = QScrollArea()
         self._graph_scroll.setWidgetResizable(True)
         self._graph_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._graph_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self._graph_container = QWidget()
         self._graph_layout = QVBoxLayout(self._graph_container)
         self._graph_layout.setContentsMargins(0, 0, 0, 0)

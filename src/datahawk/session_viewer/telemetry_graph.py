@@ -27,6 +27,8 @@ class TelemetryGraph(pg.PlotWidget):
         super().__init__(parent)
         self.setLabel("bottom", "Time", units="s")
         self.showGrid(x=True, y=True, alpha=0.3)
+        self.setMouseEnabled(x=False, y=False)
+        self.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_click)
 
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
