@@ -6,7 +6,8 @@ import math
 from dataclasses import dataclass
 
 import pyqtgraph as pg
-from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QLabel
+from PySide6.QtCore import Signal, Qt, QEvent
 
 from datahawk.types import Session, Lap
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation
@@ -27,6 +28,8 @@ class TelemetryGraph(pg.PlotWidget):
         super().__init__(parent)
         self.setLabel("bottom", "Time", units="s")
         self.showGrid(x=True, y=True, alpha=0.3)
+        self.setMouseEnabled(x=False, y=False)
+        self.setMenuEnabled(False)
         self.scene().sigMouseClicked.connect(self._on_click)
 
         self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
@@ -34,8 +37,6 @@ class TelemetryGraph(pg.PlotWidget):
         self._lap_start_time = 0.0
 
         # Current value label (bottom-left overlay, doesn't affect graph range)
-        from PySide6.QtWidgets import QLabel
-        from PySide6.QtCore import Qt
         self._value_label = QLabel(self)
         self._value_label.setStyleSheet("color: yellow; background: transparent; font-size: 12px; padding: 4px;")
         self._value_label.setAttribute(Qt.WA_TransparentForMouseEvents)
@@ -58,6 +59,7 @@ class TelemetryGraph(pg.PlotWidget):
                     ref_lap=None, diff_mode: bool):
         """Redraw the graph for the given lap/channel/reference configuration."""
         self.clear()
+        self._cursor = pg.InfiniteLine(pos=0, angle=90, pen=pg.mkPen("r", width=2))
         self.addItem(self._cursor)
 
         if lap_idx >= len(session.laps):
