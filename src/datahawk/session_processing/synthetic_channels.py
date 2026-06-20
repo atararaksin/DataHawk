@@ -78,10 +78,18 @@ def _add_gps_distance(session: SourceSession) -> None:
     if not lat_ch or not lon_ch or not lat_ch.values:
         return
 
+    dist_ch = add_gps_distance(lat_ch, lon_ch)
+    session.channels[GPS_DISTANCE] = dist_ch
+
+
+def add_gps_distance(lat_ch: SourceChannel, lon_ch: SourceChannel) -> SourceChannel:
+    """Compute cumulative GPS distance from lat/lon channels. Returns SourceChannel."""
     dist_ch = SourceChannel(name=GPS_DISTANCE)
     lats = lat_ch.values
     lons = lon_ch.values
     times = lat_ch.timestamps
+    if not lats:
+        return dist_ch
     cos_lat = math.cos(math.radians(lats[0]))
     cum_dist = 0.0
     dist_ch.append(times[0], 0.0)
@@ -90,7 +98,7 @@ def _add_gps_distance(session: SourceSession) -> None:
         dlon = (lons[i] - lons[i - 1]) * 111000 * cos_lat
         cum_dist += math.sqrt(dlat ** 2 + dlon ** 2)
         dist_ch.append(times[i], cum_dist)
-    session.channels[GPS_DISTANCE] = dist_ch
+    return dist_ch
 
 
 def add_lap_level_synthetic_channels(lap: Lap) -> None:
