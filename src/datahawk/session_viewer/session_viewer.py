@@ -334,9 +334,14 @@ class SessionViewer(QWidget):
             p.set_remove_visible(not single)
 
     def _on_set_ref_clicked(self):
-        """Set current lap as the reference lap."""
-        if self._active_lap_idx < len(self._session.laps):
-            self.ref_selected.emit(self._session.laps[self._active_lap_idx])
+        """Set selected table row as the reference lap."""
+        row = self._table.currentRow()
+        if row < 0:
+            return
+        if row < len(self._session.laps):
+            self.ref_selected.emit(self._session.laps[row])
+        elif self._session.best_theoretical_lap is not None:
+            self.ref_selected.emit(self._session.best_theoretical_lap)
 
     def set_reference_lap(self, lap):
         """Set the reference lap (from any session) and refresh display."""
@@ -344,10 +349,13 @@ class SessionViewer(QWidget):
         # Highlight matching row in this table if ref belongs to this session
         ref_row = None
         if lap is not None:
-            for i, l in enumerate(self._session.laps):
-                if l is lap:
-                    ref_row = i
-                    break
+            if lap is self._session.best_theoretical_lap:
+                ref_row = len(self._session.laps)
+            else:
+                for i, l in enumerate(self._session.laps):
+                    if l is lap:
+                        ref_row = i
+                        break
         self._table.set_ref_row(ref_row)
         self._update_plot()
         self._update_map_full()

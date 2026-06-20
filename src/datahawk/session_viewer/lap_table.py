@@ -81,7 +81,7 @@ class LapTable(QTableWidget):
         if has_theoretical:
             row = len(session.laps)
             theo = session.best_theoretical_lap
-            self.setItem(row, 0, QTableWidgetItem("Theo"))
+            self.setItem(row, 0, QTableWidgetItem("BT"))
             item = QTableWidgetItem(f"{theo.lap_time:.2f}")
             item.setForeground(purple)
             self.setItem(row, 1, item)
