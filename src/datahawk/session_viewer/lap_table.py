@@ -41,6 +41,7 @@ class LapTable(QTableWidget):
         self.setEditTriggers(QTableWidget.NoEditTriggers)
         self.cellClicked.connect(self._on_cell_clicked)
         self._ref_row: int | None = None
+        self._lap_count: int = 0
 
     def rebuild(self, session: Session):
         """Rebuild table contents from session data."""
@@ -48,7 +49,9 @@ class LapTable(QTableWidget):
         n_sectors = len(session.laps[0].sector_times) if session.laps else 0
         headers = ["Lap", "Time"] + [f"S{i+1}" for i in range(n_sectors)]
         self.setColumnCount(len(headers))
-        self.setRowCount(len(session.laps))
+        has_theoretical = session.best_theoretical_lap is not None
+        self._lap_count = len(session.laps)
+        self.setRowCount(self._lap_count + (1 if has_theoretical else 0))
         self.setHorizontalHeaderLabels(headers)
 
         purple = QBrush(QColor(128, 0, 128))
@@ -73,6 +76,20 @@ class LapTable(QTableWidget):
                 if not math.isnan(st) and st == best_sectors[s]:
                     item.setForeground(purple)
                 self.setItem(i, 2 + s, item)
+
+        # Best theoretical lap row
+        if has_theoretical:
+            row = len(session.laps)
+            theo = session.best_theoretical_lap
+            self.setItem(row, 0, QTableWidgetItem("Theo"))
+            item = QTableWidgetItem(f"{theo.lap_time:.2f}")
+            item.setForeground(purple)
+            self.setItem(row, 1, item)
+            for s, st in enumerate(theo.sector_times):
+                text = f"{st:.2f}" if not math.isnan(st) else "—"
+                item = QTableWidgetItem(text)
+                item.setForeground(purple)
+                self.setItem(row, 2 + s, item)
 
         self.resizeColumnsToContents()
         # Re-apply ref highlight after rebuild
@@ -110,6 +127,8 @@ class LapTable(QTableWidget):
         self.blockSignals(False)
 
     def _on_cell_clicked(self, row: int, col: int):
+        if row >= self._lap_count:
+            return  # theoretical row — not navigable
         if col < 2:
             self.lap_clicked.emit(LapTableLapClicked(lap_idx=row))
         else:

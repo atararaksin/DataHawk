@@ -82,6 +82,7 @@ class Session:
     best_lap_time: float
     laps: list[Lap] = field(default_factory=list)
     temporal_index: list[TemporalIndexEntry] = field(default_factory=list)
+    best_theoretical_lap: Lap | None = None
     time_resolution: float = 0.04  # 25Hz
 
 @dataclass
