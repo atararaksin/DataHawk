@@ -6,7 +6,7 @@ import math
 from bisect import bisect_left, bisect_right
 from typing import Optional
 
-from datahawk.source.types import SourceSession
+from datahawk.source.types import SourceChannel, SourceSession
 from datahawk.source.channel_constants import GPS_LATITUDE, GPS_LONGITUDE, GPS_HEADING, MASTER_CLK, BEACON
 from datahawk.session_processing.lap_detection import detect_sf_from_mychron_beacon, detect_laps, detect_sf_from_max_speed
 from datahawk.session_processing.synthetic_channels import add_lap_level_synthetic_channels
@@ -54,6 +54,87 @@ def detect_master_lap(source_session: SourceSession, sf_line: Line) -> MasterLap
     return MasterLap(lats=master_lap_lats, lons=master_lap_lons, headings=master_lap_headings)
 
 
+def reindex_lap(
+    source_channels: dict[str, SourceChannel],
+    lap_start_time: float,
+    lap_end_time: float,
+    master_lap: MasterLap,
+) -> dict[str, Channel]:
+    """Reindex all source channels for a single lap against the master lap trajectory.
+
+    Returns dict of channel_name -> Channel with spatially reindexed samples.
+    """
+    lat_ch = source_channels.get(GPS_LATITUDE)
+    lon_ch = source_channels.get(GPS_LONGITUDE)
+
+    master_lap_lats = master_lap.lats
+    master_lap_lons = master_lap.lons
+    samples_per_lap = len(master_lap_lats)
+
+    channel_names = [name for name, ch in source_channels.items() if ch.timestamps]
+    channels: dict[str, Channel] = {}
+
+    gps_times = lat_ch.timestamps if lat_ch else []
+    gps_lats = lat_ch.values if lat_ch else []
+    gps_lons = lon_ch.values if lon_ch else []
+
+    # Find GPS points within this lap
+    lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end_time]
+
+    # Fallback: not enough GPS points for spatial reindexing
+    if len(lap_gps_idx) < 10 or not lat_ch or not lon_ch or samples_per_lap < 10:
+        for ch_name in channel_names:
+            ch = source_channels[ch_name]
+            lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
+            hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end_time) + 1)
+            channels[ch_name] = Channel(
+                name=ch_name, samples=[float('nan')] * samples_per_lap,
+                raw_timestamps=[t - lap_start_time for t in ch.timestamps[lo_i:hi_i]],
+                raw_values=list(ch.values[lo_i:hi_i]),
+            )
+        return channels
+
+    # Convert to local meter coordinates
+    cos_lat = math.cos(math.radians(master_lap_lats[0]))
+    master_x = [(lon - master_lap_lons[0]) * 111000 * cos_lat for lon in master_lap_lons]
+    master_y = [(lat - master_lap_lats[0]) * 111000 for lat in master_lap_lats]
+
+    lap_lats = [gps_lats[i] for i in lap_gps_idx]
+    lap_lons = [gps_lons[i] for i in lap_gps_idx]
+    lap_times_arr = [gps_times[i] for i in lap_gps_idx]
+
+    lap_x = [(lon - master_lap_lons[0]) * 111000 * cos_lat for lon in lap_lons]
+    lap_y = [(lat - master_lap_lats[0]) * 111000 for lat in lap_lats]
+
+    MAX_RADIUS = 8.0
+    fracs = _find_nearest_points(master_x, master_y, lap_x, lap_y, MAX_RADIUS)
+
+    for ch_name in channel_names:
+        ch = source_channels[ch_name]
+        lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
+        hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end_time) + 1)
+        ch_times = ch.timestamps[lo_i:hi_i]
+        ch_vals = ch.values[lo_i:hi_i]
+        resampled = []
+        for s_idx in range(samples_per_lap):
+            seg_idx, frac = fracs[s_idx]
+            if seg_idx < 0:
+                resampled.append(float('nan'))
+            else:
+                t_interp = lap_times_arr[seg_idx] + frac * (
+                    lap_times_arr[seg_idx + 1] - lap_times_arr[seg_idx]
+                )
+                val = _interpolate_at(t_interp, ch_times, ch_vals)
+                resampled.append(val if val is not None else float('nan'))
+        raw_ts = [t - lap_start_time for t in ch_times]
+        channels[ch_name] = Channel(
+            name=ch_name, samples=resampled,
+            raw_timestamps=raw_ts, raw_values=list(ch_vals),
+        )
+
+    return channels
+
+
 def build_session(
     source_session: SourceSession,
     track: Track,
@@ -65,8 +146,7 @@ def build_session(
     lat_ch = source_session.channels.get(GPS_LATITUDE)
     lon_ch = source_session.channels.get(GPS_LONGITUDE)
 
-    master_lap_lats = track.master_lap.lats
-    master_lap_lons = track.master_lap.lons
+    samples_per_lap = len(track.master_lap.lats)
 
     if len(boundaries) < 4 or not lat_ch or not lon_ch:
         return Session(
@@ -77,7 +157,6 @@ def build_session(
             best_lap_index=0, best_lap_time=0.0,
         )
 
-    samples_per_lap = len(master_lap_lats)
     if samples_per_lap < 10:
         return Session(
             start_time=source_session.metadata.time, date=source_session.metadata.date,
@@ -89,17 +168,6 @@ def build_session(
     lap_times = [boundaries[i + 1] - boundaries[i] for i in range(len(boundaries) - 1)]
     full_lap_range = range(1, len(lap_times) - 1)
     fastest_idx = min(full_lap_range, key=lambda i: lap_times[i])
-
-    # Master lap in local meter coordinates
-    cos_lat = math.cos(math.radians(master_lap_lats[0]))
-    master_x = [(lon - master_lap_lons[0]) * 111000 * cos_lat for lon in master_lap_lons]
-    master_y = [(lat - master_lap_lats[0]) * 111000 for lat in master_lap_lats]
-
-    gps_times = lat_ch.timestamps
-    gps_lats = lat_ch.values
-    gps_lons = lon_ch.values
-
-    channel_names = [name for name, ch in source_session.channels.items() if ch.timestamps]
 
     session = Session(
         start_time=source_session.metadata.time,
@@ -116,55 +184,12 @@ def build_session(
         lap_time = lap_end - lap_start_time
 
         lap = Lap(lap_index=len(session.laps), lap_time=lap_time, lap_start_time=lap_start_time)
-
-        # Spatial reindexing for all laps
-        lap_gps_idx = [i for i, t in enumerate(gps_times) if lap_start_time <= t < lap_end]
-        if len(lap_gps_idx) < 10:
-            for ch_name in channel_names:
-                ch = source_session.channels[ch_name]
-                lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
-                hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
-                lap.channels[ch_name] = Channel(
-                    name=ch_name, samples=[float('nan')] * samples_per_lap,
-                    raw_timestamps=[t - lap_start_time for t in ch.timestamps[lo_i:hi_i]],
-                    raw_values=list(ch.values[lo_i:hi_i]),
-                )
-            session.laps.append(lap)
-            continue
-
-        lap_lats = [gps_lats[i] for i in lap_gps_idx]
-        lap_lons = [gps_lons[i] for i in lap_gps_idx]
-        lap_times_arr = [gps_times[i] for i in lap_gps_idx]
-
-        lap_x = [(lon - master_lap_lons[0]) * 111000 * cos_lat for lon in lap_lons]
-        lap_y = [(lat - master_lap_lats[0]) * 111000 for lat in lap_lats]
-
-        MAX_RADIUS = 8.0
-        fracs = _find_nearest_points(master_x, master_y, lap_x, lap_y, MAX_RADIUS)
-
-        for ch_name in channel_names:
-            ch = source_session.channels[ch_name]
-            lo_i = max(0, bisect_left(ch.timestamps, lap_start_time) - 1)
-            hi_i = min(len(ch.timestamps), bisect_right(ch.timestamps, lap_end) + 1)
-            ch_times = ch.timestamps[lo_i:hi_i]
-            ch_vals = ch.values[lo_i:hi_i]
-            resampled = []
-            for s_idx in range(samples_per_lap):
-                seg_idx, frac = fracs[s_idx]
-                if seg_idx < 0:
-                    resampled.append(float('nan'))
-                else:
-                    t_interp = lap_times_arr[seg_idx] + frac * (
-                        lap_times_arr[seg_idx + 1] - lap_times_arr[seg_idx]
-                    )
-                    val = _interpolate_at(t_interp, ch_times, ch_vals)
-                    resampled.append(val if val is not None else float('nan'))
-            raw_ts = [t - lap_start_time for t in ch_times]
-            lap.channels[ch_name] = Channel(
-                name=ch_name, samples=resampled,
-                raw_timestamps=raw_ts, raw_values=list(ch_vals),
-            )
-
+        lap.channels = reindex_lap(
+            source_channels=source_session.channels,
+            lap_start_time=lap_start_time,
+            lap_end_time=lap_end,
+            master_lap=track.master_lap,
+        )
         session.laps.append(lap)
 
     # Add lap-level synthetic channels
