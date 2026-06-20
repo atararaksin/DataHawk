@@ -465,6 +465,14 @@ class SessionViewer(QWidget):
             self._session.best_theoretical_lap = build_best_theoretical_lap(
                 self._source_session, self._session.track, self._session.laps,
             )
+            # DEBUG: check BT lap channels
+            bt = self._session.best_theoretical_lap
+            mc = bt.channels.get('Master Clk')
+            lt = bt.channels.get('Lap Time')
+            mc_nans = sum(1 for s in mc.samples if __import__('math').isnan(s)) if mc else -1
+            lt_nans = sum(1 for s in lt.samples if __import__('math').isnan(s)) if lt else -1
+            total = len(mc.samples) if mc else 0
+            print(f"[BT DEBUG] samples_per_lap={total}, MC NaN={mc_nans}/{total}, LT NaN={lt_nans}/{total}, LT exists={lt is not None}")
         else:
             self._session.best_theoretical_lap = None
 
