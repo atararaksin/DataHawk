@@ -105,7 +105,7 @@ def add_lap_level_synthetic_channels(lap: Lap) -> None:
     """Add Lap Time and Lap Distance channels to a processed lap."""
     mc = lap.channels.get(MASTER_CLK)
     if mc and mc.samples:
-        t0 = mc.samples[0]
+        t0 = lap.lap_start_time
         lap_time_ch = Channel(
             name=LAP_TIME,
             samples=[s - t0 if not math.isnan(s) else float('nan') for s in mc.samples],
