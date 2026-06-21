@@ -14,6 +14,8 @@ from datahawk.storage import (
 
 class SessionBrowser(QWidget):
     session_opened = Signal(str)  # emits session_id
+    import_mychron_requested = Signal()  # user clicked import mychron
+    import_video_requested = Signal()  # user clicked import video
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,7 +51,7 @@ class SessionBrowser(QWidget):
 
         splitter.addWidget(left)
 
-        # Right panel: sessions
+        # Right panel: sessions + import buttons
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -64,6 +66,17 @@ class SessionBrowser(QWidget):
         self._session_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._session_table.customContextMenuRequested.connect(self._on_session_context_menu)
         right_layout.addWidget(self._session_table)
+
+        # Import buttons row
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        mychron_btn = QPushButton("Import from MyChron")
+        mychron_btn.clicked.connect(self.import_mychron_requested.emit)
+        btn_row.addWidget(mychron_btn)
+        video_btn = QPushButton("Import from Video")
+        video_btn.clicked.connect(self.import_video_requested.emit)
+        btn_row.addWidget(video_btn)
+        right_layout.addLayout(btn_row)
 
         splitter.addWidget(right)
         splitter.setSizes([250, 750])

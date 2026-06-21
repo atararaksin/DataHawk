@@ -3,21 +3,62 @@
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QToolBar, QMessageBox,
-    QFileDialog, QDialog, QVBoxLayout, QDialogButtonBox,
+    QApplication, QMainWindow, QMessageBox,
+    QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox,
+    QWidget, QComboBox,
 )
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
+from PySide6.QtCore import Qt, Signal
 
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer, AnalysisWindow
-from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track, get_event_track
+from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track, get_event_track, list_events
+
+
+class _EventSelector(QWidget):
+    """Dropdown of events with track pre-fill on change."""
+    changed = Signal()
+
+    def __init__(self, track_selector, initial_event_id: str = "", parent=None):
+        super().__init__(parent)
+        self._track_selector = track_selector
+        self._events = list_events()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        from PySide6.QtWidgets import QLabel
+        layout.addWidget(QLabel("Event:"))
+        self._combo = QComboBox()
+        for e in self._events:
+            self._combo.addItem(e["name"], e["id"])
+        # Pre-select
+        for i, e in enumerate(self._events):
+            if e["id"] == initial_event_id:
+                self._combo.setCurrentIndex(i)
+                break
+        self._combo.currentIndexChanged.connect(self._on_changed)
+        layout.addWidget(self._combo)
+        # Initial track pre-fill
+        self._update_track_prefill()
+
+    def _on_changed(self, _idx):
+        self._update_track_prefill()
+        self.changed.emit()
+
+    def _update_track_prefill(self):
+        eid = self.event_id
+        if eid:
+            track = get_event_track(eid)
+            if track:
+                self._track_selector.set_track(track)
+
+    @property
+    def event_id(self) -> str:
+        return self._combo.currentData() or ""
 
 
 class _GoProDialog(QDialog):
-    """Dialog to collect driver name and track for video import."""
-    def __init__(self, parent=None):
+    """Dialog to collect driver name, event, and track for video import."""
+    def __init__(self, parent=None, event_id: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Import from Video")
         layout = QVBoxLayout(self)
@@ -28,6 +69,10 @@ class _GoProDialog(QDialog):
 
         from datahawk.track_selector import TrackSelector
         self.track_selector = TrackSelector()
+
+        self.event_selector = _EventSelector(self.track_selector, initial_event_id=event_id)
+        layout.addWidget(self.event_selector)
+
         layout.addWidget(self.track_selector)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -43,30 +88,15 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1024, 768)
         self._analysis_windows: dict[str, AnalysisWindow] = {}  # track_name -> window
 
-        # Toolbar
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
-
-        import_action = QAction("Import from MyChron", self)
-        import_action.triggered.connect(self._on_import)
-        toolbar.addAction(import_action)
-
-        video_action = QAction("Import from Video", self)
-        video_action.triggered.connect(self._on_import_video)
-        toolbar.addAction(video_action)
-
         # Session browser as central widget
         self._browser = SessionBrowser()
         self._browser.session_opened.connect(self._on_open_session)
+        self._browser.import_mychron_requested.connect(self._on_import)
+        self._browser.import_video_requested.connect(self._on_import_video)
         self.setCentralWidget(self._browser)
 
     def _on_import(self):
-        event_id = self._browser.selected_event_id
-        if not event_id:
-            QMessageBox.warning(self, "Error", "Please select an event first.")
-            return
-        dialog = ImportDialog(self, event_id=event_id)
+        dialog = ImportDialog(self, event_id=self._browser.selected_event_id)
         if dialog.exec():
             self.statusBar().showMessage(
                 f"Imported {dialog.imported_count} session(s)", 5000
@@ -74,25 +104,17 @@ class MainWindow(QMainWindow):
             self._browser.refresh()
 
     def _on_import_video(self):
-        event_id = self._browser.selected_event_id
-        if not event_id:
-            QMessageBox.warning(self, "Error", "Please select an event first.")
-            return
-
         path, _ = QFileDialog.getOpenFileName(
             self, "Import from Video", "", "Video (*.mp4 *.MP4 *.mov *.avi)")
         if not path:
             return
 
-        dialog = _GoProDialog(self)
-        # Pre-fill track from sibling sessions in this event
-        event_track = get_event_track(event_id)
-        if event_track:
-            dialog.track_selector.set_track(event_track)
+        dialog = _GoProDialog(self, event_id=self._browser.selected_event_id)
         if not dialog.exec():
             return
         driver = dialog.driver_selector.driver_name or "Unknown"
         track_name = dialog.track_selector.track_name
+        event_id = dialog.event_selector.event_id
         if not track_name:
             QMessageBox.warning(self, "Error", "Track name cannot be empty.")
             return
