@@ -17,6 +17,7 @@ from datahawk.source.channel_constants import GPS_SPEED
 from datahawk.session_processing import build_session
 from datahawk.session_utils import get_channel_value_in_another_lap_with_interpolation, get_sample_index_for_session_time, create_perpendicular_line_at_time, get_lap_idx_by_session_time
 from datahawk.session_processing import populate_sectors
+from datahawk.session_processing.best_theoretical import build_best_theoretical_lap
 from datahawk.storage import delete_track
 from datahawk.session_viewer.map_widget import MapWidget
 from datahawk.session_viewer.lap_table import LapTable, LapTableLapClicked, LapTableSectorClicked
@@ -40,6 +41,7 @@ class SessionViewer(QWidget):
         self._video_path = video_path
         self._source_type = source_type
         populate_sectors(self._session)
+        self._populate_best_theoretical()
 
         from PySide6.QtWidgets import QApplication
         QApplication.instance().installEventFilter(self)
@@ -332,9 +334,14 @@ class SessionViewer(QWidget):
             p.set_remove_visible(not single)
 
     def _on_set_ref_clicked(self):
-        """Set current lap as the reference lap."""
-        if self._active_lap_idx < len(self._session.laps):
-            self.ref_selected.emit(self._session.laps[self._active_lap_idx])
+        """Set selected table row as the reference lap."""
+        row = self._table.currentRow()
+        if row < 0:
+            return
+        if row < len(self._session.laps):
+            self.ref_selected.emit(self._session.laps[row])
+        elif self._session.best_theoretical_lap is not None:
+            self.ref_selected.emit(self._session.best_theoretical_lap)
 
     def set_reference_lap(self, lap):
         """Set the reference lap (from any session) and refresh display."""
@@ -342,10 +349,13 @@ class SessionViewer(QWidget):
         # Highlight matching row in this table if ref belongs to this session
         ref_row = None
         if lap is not None:
-            for i, l in enumerate(self._session.laps):
-                if l is lap:
-                    ref_row = i
-                    break
+            if lap is self._session.best_theoretical_lap:
+                ref_row = len(self._session.laps)
+            else:
+                for i, l in enumerate(self._session.laps):
+                    if l is lap:
+                        ref_row = i
+                        break
         self._table.set_ref_row(ref_row)
         self._update_plot()
         self._update_map_full()
@@ -447,11 +457,23 @@ class SessionViewer(QWidget):
     def session_id(self) -> str:
         return self._session_id
 
+    def _populate_best_theoretical(self):
+        """Compute best theoretical lap if sectors are available."""
+        if (self._session.laps and self._session.track and
+                self._session.laps[0].sector_times and
+                len(self._session.laps[0].sector_times) > 1):
+            self._session.best_theoretical_lap = build_best_theoretical_lap(
+                self._source_session, self._session.track, self._session.laps,
+            )
+        else:
+            self._session.best_theoretical_lap = None
+
     def rebuild_with_track(self, track):
         """Rebuild session with a new track. Called by AnalysisWindow on track changes."""
         prev_time = self._current_session_time
         self._session = build_session(self._source_session, track)
         populate_sectors(self._session)
+        self._populate_best_theoretical()
         self._map.set_session(self._session)
         self._active_lap_idx = 0
         self._rebuild_lap_table()
