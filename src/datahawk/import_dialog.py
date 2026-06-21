@@ -300,6 +300,15 @@ class ImportDialog(QDialog):
         self._driver_selector.setEnabled(True)
         QMessageBox.warning(self, "Download Error", msg)
 
+    def reject(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
+        if self._dl_worker and self._dl_worker.isRunning():
+            self._dl_worker.quit()
+            self._dl_worker.wait()
+        super().reject()
+
     @property
     def imported_count(self) -> int:
         return self._imported_count

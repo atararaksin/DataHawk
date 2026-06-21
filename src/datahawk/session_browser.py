@@ -168,23 +168,21 @@ class SessionBrowser(QWidget):
                 self.refresh()
 
     def _on_add_event(self):
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QLineEdit, QDateEdit
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QLineEdit, QDateEdit, QFormLayout
         from PySide6.QtCore import QDate
         dlg = QDialog(self)
         dlg.setWindowTitle("New Event")
-        layout = QVBoxLayout(dlg)
-        layout.addWidget(QLabel("Name:"))
+        layout = QFormLayout(dlg)
         name_input = QLineEdit()
-        layout.addWidget(name_input)
-        layout.addWidget(QLabel("Date:"))
+        layout.addRow("Name:", name_input)
         date_edit = QDateEdit(QDate.currentDate())
         date_edit.setCalendarPopup(True)
         date_edit.setDisplayFormat("yyyy-MM-dd")
-        layout.addWidget(date_edit)
+        layout.addRow("Date:", date_edit)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
+        layout.addRow(buttons)
         if dlg.exec() and name_input.text().strip():
             eid = create_event(name_input.text().strip(), date_edit.date().toString("yyyy-MM-dd"))
             self._selected_event_id = eid
