@@ -1,7 +1,6 @@
 """Session browser widget with event grouping."""
 
 from PySide6.QtCore import Signal, Qt
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
     QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter, QLabel, QToolBar,
@@ -11,11 +10,6 @@ from datahawk.storage import (
     list_events, list_sessions_for_event, delete_session, delete_event,
     create_event, get_event_track,
 )
-
-
-def _std_icon(pixmap) -> QIcon:
-    from PySide6.QtWidgets import QApplication
-    return QApplication.style().standardIcon(pixmap)
 
 
 class SessionBrowser(QWidget):
@@ -41,18 +35,17 @@ class SessionBrowser(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
 
-        from PySide6.QtWidgets import QStyle
+        from PySide6.QtWidgets import QSizePolicy
         event_tb = QToolBar()
         event_tb.setMovable(False)
-        event_tb.setIconSize(Qt.QtSizeType if False else event_tb.iconSize())  # keep default
         event_tb.addWidget(QLabel(" Events"))
         spacer = QWidget()
-        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
-        from PySide6.QtWidgets import QSizePolicy
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         event_tb.addWidget(spacer)
-        event_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_FileDialogNewFolder), "Add", self._on_add_event)
-        event_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_TrashIcon), "Remove", self._on_delete_event)
+        add_act = event_tb.addAction("+")
+        add_act.triggered.connect(self._on_add_event)
+        del_act = event_tb.addAction("−")
+        del_act.triggered.connect(self._on_delete_event)
         left_layout.addWidget(event_tb)
 
         self._event_table = QTableWidget()
@@ -78,8 +71,10 @@ class SessionBrowser(QWidget):
         spacer2 = QWidget()
         spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         session_tb.addWidget(spacer2)
-        session_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Import from MyChron", self.import_mychron_requested.emit)
-        session_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_DirOpenIcon), "Import from Video", self.import_video_requested.emit)
+        mc_act = session_tb.addAction("Import from MyChron")
+        mc_act.triggered.connect(self.import_mychron_requested.emit)
+        vid_act = session_tb.addAction("Import from Video")
+        vid_act.triggered.connect(self.import_video_requested.emit)
         right_layout.addWidget(session_tb)
 
         self._session_table = QTableWidget()
