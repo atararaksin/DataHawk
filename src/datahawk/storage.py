@@ -74,7 +74,7 @@ def create_event(name: str, date: str = "") -> str:
 def list_events() -> list[dict]:
     """Return all events, newest first."""
     db = _get_db()
-    rows = db.execute("SELECT * FROM events ORDER BY date DESC, name").fetchall()
+    rows = db.execute("SELECT * FROM events ORDER BY date DESC, name ASC").fetchall()
     db.close()
     return [dict(r) for r in rows]
 
