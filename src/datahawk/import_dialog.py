@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 )
 
 from datahawk.source.mychron.mychron import check_device, list_sessions, download_session, Session
-from datahawk.storage import save_session, get_imported_filenames, load_track, save_track
+from datahawk.storage import save_session, get_imported_filenames, load_track, save_track, get_event_track
 from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.track_selector import TrackSelector
 from datahawk.driver_selector import DriverSelector
@@ -33,11 +33,12 @@ class _DownloadWorker(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, sessions: list[Session], driver: str, track_name: str):
+    def __init__(self, sessions: list[Session], driver: str, track_name: str, event_id: str = ""):
         super().__init__()
         self._sessions = sessions
         self._driver = driver
         self._track_name = track_name
+        self._event_id = event_id
 
     def run(self):
         try:
@@ -86,6 +87,7 @@ class _DownloadWorker(QThread):
                         track=self._track_name,
                         best_lap_time=None,
                         source_type="MyChron 5",
+                        event_id=self._event_id,
                     )
                     count += 1
             self.finished.emit(count)
@@ -94,12 +96,13 @@ class _DownloadWorker(QThread):
 
 
 class ImportDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, event_id: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Import from MyChron 5")
         self.setMinimumSize(700, 400)
         self._sessions: list[Session] = []
         self._imported_count = 0
+        self._event_id = event_id
 
         layout = QVBoxLayout(self)
 
@@ -112,6 +115,12 @@ class ImportDialog(QDialog):
         self._track_selector = TrackSelector()
         self._track_selector.changed.connect(self._update_import_btn)
         layout.addWidget(self._track_selector)
+
+        # Pre-fill track from sibling sessions in this event
+        if self._event_id:
+            event_track = get_event_track(self._event_id)
+            if event_track:
+                self._track_selector.set_track(event_track)
 
         # Status bar
         status_row = QHBoxLayout()
@@ -213,7 +222,7 @@ class ImportDialog(QDialog):
         self._progress.show()
         self._status.setText("Downloading...")
 
-        self._dl_worker = _DownloadWorker(selected, driver, self._track_selector.track_name)
+        self._dl_worker = _DownloadWorker(selected, driver, self._track_selector.track_name, self._event_id)
         self._dl_worker.progress.connect(self._on_dl_progress)
         self._dl_worker.finished.connect(self._on_dl_done)
         self._dl_worker.error.connect(self._on_dl_error)

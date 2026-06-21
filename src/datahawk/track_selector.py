@@ -49,3 +49,9 @@ class TrackSelector(QWidget):
         if self.is_new_track:
             return self._name_input.text().strip()
         return self._combo.currentText().strip()
+
+    def set_track(self, name: str):
+        """Pre-select an existing track by name."""
+        idx = self._combo.findText(name)
+        if idx >= 0:
+            self._combo.setCurrentIndex(idx)

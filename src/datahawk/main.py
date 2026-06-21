@@ -12,7 +12,7 @@ from PySide6.QtGui import QAction
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer, AnalysisWindow
-from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track
+from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track, get_event_track
 
 
 class _GoProDialog(QDialog):
@@ -62,7 +62,11 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self._browser)
 
     def _on_import(self):
-        dialog = ImportDialog(self)
+        event_id = self._browser.selected_event_id
+        if not event_id:
+            QMessageBox.warning(self, "Error", "Please select an event first.")
+            return
+        dialog = ImportDialog(self, event_id=event_id)
         if dialog.exec():
             self.statusBar().showMessage(
                 f"Imported {dialog.imported_count} session(s)", 5000
@@ -70,12 +74,21 @@ class MainWindow(QMainWindow):
             self._browser.refresh()
 
     def _on_import_video(self):
+        event_id = self._browser.selected_event_id
+        if not event_id:
+            QMessageBox.warning(self, "Error", "Please select an event first.")
+            return
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Import from Video", "", "Video (*.mp4 *.MP4 *.mov *.avi)")
         if not path:
             return
 
         dialog = _GoProDialog(self)
+        # Pre-fill track from sibling sessions in this event
+        event_track = get_event_track(event_id)
+        if event_track:
+            dialog.track_selector.set_track(event_track)
         if not dialog.exec():
             return
         driver = dialog.driver_selector.driver_name or "Unknown"
@@ -135,6 +148,7 @@ class MainWindow(QMainWindow):
                 best_lap_time=session_built.laps[session_built.best_lap_index].lap_time if session_built.laps else None,
                 source_type=source_type,
                 extension=".json",
+                event_id=event_id,
             )
 
             # Persist video path with offset 0 (video IS telemetry for GoPro)
