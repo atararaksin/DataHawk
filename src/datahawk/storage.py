@@ -54,24 +54,7 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    _migrate_add_events(conn)
     return conn
-
-
-def _migrate_add_events(conn: sqlite3.Connection):
-    """Temporary migration: add event_id column to existing sessions table, create Archive event."""
-    # Check if event_id column exists
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()]
-    if "event_id" not in cols:
-        conn.execute("ALTER TABLE sessions ADD COLUMN event_id TEXT NOT NULL DEFAULT ''")
-    # Create Archive event and assign all orphan sessions to it
-    existing = conn.execute("SELECT id FROM events WHERE name = 'Archive'").fetchone()
-    if not existing:
-        archive_id = uuid.uuid4().hex[:12]
-        conn.execute("INSERT INTO events (id, name, date) VALUES (?, ?, ?)",
-                     (archive_id, "Archive", datetime.now().strftime("%Y-%m-%d")))
-        conn.execute("UPDATE sessions SET event_id = ? WHERE event_id = ''", (archive_id,))
-        conn.commit()
 
 
 # --- Event CRUD ---
