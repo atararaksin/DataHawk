@@ -1,15 +1,21 @@
 """Session browser widget with event grouping."""
 
 from PySide6.QtCore import Signal, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter, QLabel,
+    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter, QLabel, QToolBar,
 )
 
 from datahawk.storage import (
     list_events, list_sessions_for_event, delete_session, delete_event,
     create_event, get_event_track,
 )
+
+
+def _std_icon(pixmap) -> QIcon:
+    from PySide6.QtWidgets import QApplication
+    return QApplication.style().standardIcon(pixmap)
 
 
 class SessionBrowser(QWidget):
@@ -33,20 +39,21 @@ class SessionBrowser(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
-        # Event toolbar
-        event_toolbar = QHBoxLayout()
-        event_toolbar.addWidget(QLabel("Events"))
-        event_toolbar.addStretch()
-        add_event_btn = QPushButton("+")
-        add_event_btn.setFixedSize(28, 28)
-        add_event_btn.clicked.connect(self._on_add_event)
-        event_toolbar.addWidget(add_event_btn)
-        del_event_btn = QPushButton("−")
-        del_event_btn.setFixedSize(28, 28)
-        del_event_btn.clicked.connect(self._on_delete_event)
-        event_toolbar.addWidget(del_event_btn)
-        left_layout.addLayout(event_toolbar)
+        from PySide6.QtWidgets import QStyle
+        event_tb = QToolBar()
+        event_tb.setMovable(False)
+        event_tb.setIconSize(Qt.QtSizeType if False else event_tb.iconSize())  # keep default
+        event_tb.addWidget(QLabel(" Events"))
+        spacer = QWidget()
+        spacer.setSizePolicy(spacer.sizePolicy().horizontalPolicy(), spacer.sizePolicy().verticalPolicy())
+        from PySide6.QtWidgets import QSizePolicy
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        event_tb.addWidget(spacer)
+        event_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_FileDialogNewFolder), "Add", self._on_add_event)
+        event_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_TrashIcon), "Remove", self._on_delete_event)
+        left_layout.addWidget(event_tb)
 
         self._event_table = QTableWidget()
         self._event_table.setColumnCount(2)
@@ -63,18 +70,17 @@ class SessionBrowser(QWidget):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
 
-        # Session toolbar
-        session_toolbar = QHBoxLayout()
-        session_toolbar.addWidget(QLabel("Sessions"))
-        session_toolbar.addStretch()
-        mychron_btn = QPushButton("Import from MyChron")
-        mychron_btn.clicked.connect(self.import_mychron_requested.emit)
-        session_toolbar.addWidget(mychron_btn)
-        video_btn = QPushButton("Import from Video")
-        video_btn.clicked.connect(self.import_video_requested.emit)
-        session_toolbar.addWidget(video_btn)
-        right_layout.addLayout(session_toolbar)
+        session_tb = QToolBar()
+        session_tb.setMovable(False)
+        session_tb.addWidget(QLabel(" Sessions"))
+        spacer2 = QWidget()
+        spacer2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        session_tb.addWidget(spacer2)
+        session_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Import from MyChron", self.import_mychron_requested.emit)
+        session_tb.addAction(_std_icon(QStyle.StandardPixmap.SP_DirOpenIcon), "Import from Video", self.import_video_requested.emit)
+        right_layout.addWidget(session_tb)
 
         self._session_table = QTableWidget()
         self._session_table.setColumnCount(8)
