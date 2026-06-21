@@ -3,7 +3,7 @@
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter,
+    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter, QLabel,
 )
 
 from datahawk.storage import (
@@ -34,6 +34,20 @@ class SessionBrowser(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Event toolbar
+        event_toolbar = QHBoxLayout()
+        event_toolbar.addWidget(QLabel("Events"))
+        event_toolbar.addStretch()
+        add_event_btn = QPushButton("+")
+        add_event_btn.setFixedSize(28, 28)
+        add_event_btn.clicked.connect(self._on_add_event)
+        event_toolbar.addWidget(add_event_btn)
+        del_event_btn = QPushButton("−")
+        del_event_btn.setFixedSize(28, 28)
+        del_event_btn.clicked.connect(self._on_delete_event)
+        event_toolbar.addWidget(del_event_btn)
+        left_layout.addLayout(event_toolbar)
+
         self._event_table = QTableWidget()
         self._event_table.setColumnCount(2)
         self._event_table.setHorizontalHeaderLabels(["Event", "Date"])
@@ -41,20 +55,26 @@ class SessionBrowser(QWidget):
         self._event_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._event_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._event_table.currentCellChanged.connect(self._on_event_selected)
-        self._event_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self._event_table.customContextMenuRequested.connect(self._on_event_context_menu)
         left_layout.addWidget(self._event_table)
-
-        add_event_btn = QPushButton("+ Event")
-        add_event_btn.clicked.connect(self._on_add_event)
-        left_layout.addWidget(add_event_btn)
 
         splitter.addWidget(left)
 
-        # Right panel: sessions + import buttons
+        # Right panel: sessions
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Session toolbar
+        session_toolbar = QHBoxLayout()
+        session_toolbar.addWidget(QLabel("Sessions"))
+        session_toolbar.addStretch()
+        mychron_btn = QPushButton("Import from MyChron")
+        mychron_btn.clicked.connect(self.import_mychron_requested.emit)
+        session_toolbar.addWidget(mychron_btn)
+        video_btn = QPushButton("Import from Video")
+        video_btn.clicked.connect(self.import_video_requested.emit)
+        session_toolbar.addWidget(video_btn)
+        right_layout.addLayout(session_toolbar)
 
         self._session_table = QTableWidget()
         self._session_table.setColumnCount(8)
@@ -66,17 +86,6 @@ class SessionBrowser(QWidget):
         self._session_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._session_table.customContextMenuRequested.connect(self._on_session_context_menu)
         right_layout.addWidget(self._session_table)
-
-        # Import buttons row
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        mychron_btn = QPushButton("Import from MyChron")
-        mychron_btn.clicked.connect(self.import_mychron_requested.emit)
-        btn_row.addWidget(mychron_btn)
-        video_btn = QPushButton("Import from Video")
-        video_btn.clicked.connect(self.import_video_requested.emit)
-        btn_row.addWidget(video_btn)
-        right_layout.addLayout(btn_row)
 
         splitter.addWidget(right)
         splitter.setSizes([250, 750])
@@ -149,23 +158,19 @@ class SessionBrowser(QWidget):
                 delete_session(session["id"])
                 self.refresh()
 
-    def _on_event_context_menu(self, pos):
-        row = self._event_table.rowAt(pos.y())
+    def _on_delete_event(self):
+        row = self._event_table.currentRow()
         if row < 0 or row >= len(self._events):
             return
-        menu = QMenu(self)
-        delete_action = menu.addAction("Delete Event")
-        action = menu.exec(self._event_table.viewport().mapToGlobal(pos))
-        if action == delete_action:
-            event = self._events[row]
-            reply = QMessageBox.question(
-                self, "Delete Event",
-                f"Delete event '{event['name']}' and all its sessions?",
-                QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
-                delete_event(event["id"])
-                self._selected_event_id = ""
-                self.refresh()
+        event = self._events[row]
+        reply = QMessageBox.question(
+            self, "Delete Event",
+            f"Delete event '{event['name']}' and all its sessions?",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            delete_event(event["id"])
+            self._selected_event_id = ""
+            self.refresh()
 
     def _on_add_event(self):
         from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QLineEdit, QDateEdit, QFormLayout
