@@ -14,8 +14,14 @@ SESSIONS_DIR = DATA_DIR / "sessions"
 DB_PATH = DATA_DIR / "datahawk.db"
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    date TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL DEFAULT '',
     filename TEXT NOT NULL,
     source_type TEXT NOT NULL DEFAULT '',
     driver TEXT NOT NULL DEFAULT '',
@@ -28,7 +34,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     file_path TEXT NOT NULL,
     video_path TEXT NOT NULL DEFAULT '',
     video_offset REAL,
-    imported_at TEXT NOT NULL
+    imported_at TEXT NOT NULL,
+    FOREIGN KEY (event_id) REFERENCES events(id)
 );
 CREATE TABLE IF NOT EXISTS tracks (
     name TEXT PRIMARY KEY,
@@ -50,6 +57,59 @@ def _get_db() -> sqlite3.Connection:
     return conn
 
 
+# --- Event CRUD ---
+
+def create_event(name: str, date: str = "") -> str:
+    """Create a new event. Returns event ID."""
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    event_id = uuid.uuid4().hex[:12]
+    db = _get_db()
+    db.execute("INSERT INTO events (id, name, date) VALUES (?, ?, ?)", (event_id, name, date))
+    db.commit()
+    db.close()
+    return event_id
+
+
+def list_events() -> list[dict]:
+    """Return all events, newest first."""
+    db = _get_db()
+    rows = db.execute("SELECT * FROM events ORDER BY date DESC, name ASC").fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
+def delete_event(event_id: str) -> None:
+    """Delete an event and all its sessions."""
+    db = _get_db()
+    session_rows = db.execute("SELECT id FROM sessions WHERE event_id = ?", (event_id,)).fetchall()
+    for row in session_rows:
+        delete_session(row["id"])
+    db.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    db.commit()
+    db.close()
+
+
+def get_event_track(event_id: str) -> str | None:
+    """Return the track name of any session in this event, or None."""
+    db = _get_db()
+    row = db.execute("SELECT track FROM sessions WHERE event_id = ? AND track != '' LIMIT 1",
+                     (event_id,)).fetchone()
+    db.close()
+    return row["track"] if row else None
+
+
+def list_sessions_for_event(event_id: str) -> list[dict]:
+    """Return all sessions belonging to an event."""
+    db = _get_db()
+    rows = db.execute(
+        "SELECT * FROM sessions WHERE event_id = ? ORDER BY date DESC, time DESC",
+        (event_id,)
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
 def get_imported_filenames() -> set[str]:
     """Return set of (filename, date, time) tuples already imported."""
     db = _get_db()
@@ -61,22 +121,23 @@ def get_imported_filenames() -> set[str]:
 def save_session(driver: str, filename: str, data: bytes,
                  date: str = "", time: str = "", laps: str = "",
                  track: str = "", best_lap_time: float = None,
-                 source_type: str = "", extension: str = ".xrz") -> str:
+                 source_type: str = "", extension: str = ".xrz",
+                 event_id: str = "") -> str:
     """Save session file and metadata. Overwrites if already imported. Returns session ID."""
     db = _get_db()
 
     existing = db.execute(
-        "SELECT id, file_path FROM sessions WHERE filename = ? AND date = ? AND time = ?",
-        (filename, date, time)
+        "SELECT id, file_path FROM sessions WHERE filename = ? AND date = ? AND time = ? AND event_id = ?",
+        (filename, date, time, event_id)
     ).fetchone()
 
     if existing:
         (SESSIONS_DIR / existing["file_path"]).write_bytes(data)
         db.execute(
             """UPDATE sessions SET driver=?, date=?, time=?, laps=?, track=?,
-               size=?, best_lap_time=?, source_type=?, imported_at=? WHERE id=?""",
+               size=?, best_lap_time=?, source_type=?, event_id=?, imported_at=? WHERE id=?""",
             (driver, date, time, laps, track, len(data), best_lap_time,
-             source_type, datetime.now().isoformat(), existing["id"]),
+             source_type, event_id, datetime.now().isoformat(), existing["id"]),
         )
         db.commit()
         db.close()
@@ -88,9 +149,9 @@ def save_session(driver: str, filename: str, data: bytes,
 
     db.execute(
         """INSERT INTO sessions
-           (id, driver, filename, source_type, date, time, laps, track, size, best_lap_time, file_path, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (session_id, driver, filename, source_type, date, time, laps, track,
+           (id, event_id, driver, filename, source_type, date, time, laps, track, size, best_lap_time, file_path, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (session_id, event_id, driver, filename, source_type, date, time, laps, track,
          len(data), best_lap_time, rel_path, datetime.now().isoformat()),
     )
     db.commit()

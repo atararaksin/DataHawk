@@ -4,11 +4,11 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QProgressBar,
+    QProgressBar, QComboBox, QWidget,
 )
 
 from datahawk.source.mychron.mychron import check_device, list_sessions, download_session, Session
-from datahawk.storage import save_session, get_imported_filenames, load_track, save_track
+from datahawk.storage import save_session, get_imported_filenames, load_track, save_track, get_event_track, list_events
 from datahawk.source.mychron.xrz_parser import parse_xrz
 from datahawk.track_selector import TrackSelector
 from datahawk.driver_selector import DriverSelector
@@ -33,11 +33,12 @@ class _DownloadWorker(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, sessions: list[Session], driver: str, track_name: str):
+    def __init__(self, sessions: list[Session], driver: str, track_name: str, event_id: str = ""):
         super().__init__()
         self._sessions = sessions
         self._driver = driver
         self._track_name = track_name
+        self._event_id = event_id
 
     def run(self):
         try:
@@ -86,6 +87,7 @@ class _DownloadWorker(QThread):
                         track=self._track_name,
                         best_lap_time=None,
                         source_type="MyChron 5",
+                        event_id=self._event_id,
                     )
                     count += 1
             self.finished.emit(count)
@@ -94,7 +96,7 @@ class _DownloadWorker(QThread):
 
 
 class ImportDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, event_id: str = ""):
         super().__init__(parent)
         self.setWindowTitle("Import from MyChron 5")
         self.setMinimumSize(700, 400)
@@ -102,6 +104,40 @@ class ImportDialog(QDialog):
         self._imported_count = 0
 
         layout = QVBoxLayout(self)
+
+        # Event selection
+        event_row = QHBoxLayout()
+        event_row.addWidget(QLabel("Event:"))
+        self._event_combo = QComboBox()
+        self._event_combo.addItem("")  # blank placeholder
+        self._events = list_events()
+        for e in self._events:
+            self._event_combo.addItem(e["name"], e["id"])
+        self._event_combo.addItem("➕ Add new event...")
+        # Pre-select
+        for i, e in enumerate(self._events):
+            if e["id"] == event_id:
+                self._event_combo.setCurrentIndex(i + 1)  # +1 for blank
+                break
+        self._event_combo.currentTextChanged.connect(self._on_event_changed)
+        event_row.addWidget(self._event_combo)
+        layout.addLayout(event_row)
+
+        # New event inputs (hidden by default)
+        from PySide6.QtWidgets import QLineEdit, QDateEdit
+        from PySide6.QtCore import QDate
+        self._new_event_row = QWidget()
+        new_layout = QHBoxLayout(self._new_event_row)
+        new_layout.setContentsMargins(0, 0, 0, 0)
+        self._event_name_input = QLineEdit()
+        self._event_name_input.setPlaceholderText("Event name")
+        new_layout.addWidget(self._event_name_input)
+        self._event_date_edit = QDateEdit(QDate.currentDate())
+        self._event_date_edit.setCalendarPopup(True)
+        self._event_date_edit.setDisplayFormat("yyyy-MM-dd")
+        new_layout.addWidget(self._event_date_edit)
+        self._new_event_row.setVisible(False)
+        layout.addWidget(self._new_event_row)
 
         # Driver selection
         self._driver_selector = DriverSelector()
@@ -112,6 +148,9 @@ class ImportDialog(QDialog):
         self._track_selector = TrackSelector()
         self._track_selector.changed.connect(self._update_import_btn)
         layout.addWidget(self._track_selector)
+
+        # Pre-fill track from current event
+        self._prefill_track()
 
         # Status bar
         status_row = QHBoxLayout()
@@ -155,10 +194,33 @@ class ImportDialog(QDialog):
         self._load_sessions()
 
     def _update_import_btn(self):
+        if not hasattr(self, '_table'):
+            return
         has_selection = len(self._table.selectedItems()) > 0
         has_driver = bool(self._driver_selector.driver_name)
         has_track = bool(self._track_selector.track_name)
         self._import_btn.setEnabled(has_selection and has_driver and has_track)
+
+    def _on_event_changed(self, text):
+        self._new_event_row.setVisible(text == "➕ Add new event...")
+        self._prefill_track()
+
+    def _prefill_track(self):
+        eid = self._event_combo.currentData()
+        if eid:
+            track = get_event_track(eid)
+            if track:
+                self._track_selector.set_track(track)
+
+    def _get_or_create_event_id(self) -> str:
+        if self._event_combo.currentText() == "➕ Add new event...":
+            name = self._event_name_input.text().strip()
+            if not name:
+                return ""
+            date = self._event_date_edit.date().toString("yyyy-MM-dd")
+            from datahawk.storage import create_event
+            return create_event(name, date)
+        return self._event_combo.currentData() or ""
 
     def _load_sessions(self):
         self._status.setText("Connecting to device...")
@@ -213,7 +275,7 @@ class ImportDialog(QDialog):
         self._progress.show()
         self._status.setText("Downloading...")
 
-        self._dl_worker = _DownloadWorker(selected, driver, self._track_selector.track_name)
+        self._dl_worker = _DownloadWorker(selected, driver, self._track_selector.track_name, self._get_or_create_event_id())
         self._dl_worker.progress.connect(self._on_dl_progress)
         self._dl_worker.finished.connect(self._on_dl_done)
         self._dl_worker.error.connect(self._on_dl_error)
@@ -237,6 +299,15 @@ class ImportDialog(QDialog):
         self._refresh_btn.setEnabled(True)
         self._driver_selector.setEnabled(True)
         QMessageBox.warning(self, "Download Error", msg)
+
+    def reject(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.quit()
+            self._worker.wait()
+        if self._dl_worker and self._dl_worker.isRunning():
+            self._dl_worker.quit()
+            self._dl_worker.wait()
+        super().reject()
 
     @property
     def imported_count(self) -> int:

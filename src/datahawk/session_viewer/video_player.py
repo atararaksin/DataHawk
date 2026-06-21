@@ -38,6 +38,7 @@ class VideoPlayer(QWidget):
 
         self._video_widget = QVideoWidget()
         layout.addWidget(self._video_widget, 1)
+        self._video_widget.installEventFilter(self)
 
         # Controls
         ctrl_row = QHBoxLayout()
@@ -145,6 +146,15 @@ class VideoPlayer(QWidget):
         if path:
             self.video_path_changed.emit(Path(path))
             self.load_video(Path(path), is_mychron_session=self._is_mychron_session)
+
+    def eventFilter(self, obj, event):
+        if obj is self._video_widget and event.type() == event.Type.MouseButtonPress:
+            if self._player.source().isEmpty():
+                self._on_load()
+            else:
+                self._toggle_play()
+            return True
+        return super().eventFilter(obj, event)
 
     def _compute_sync(self, video_path: str):
         try:
