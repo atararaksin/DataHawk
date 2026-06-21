@@ -5,42 +5,69 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QMessageBox,
     QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox,
-    QWidget, QComboBox,
+    QWidget, QComboBox, QLineEdit,
 )
 from PySide6.QtCore import Qt, Signal
 
 from datahawk.import_dialog import ImportDialog
 from datahawk.session_browser import SessionBrowser
 from datahawk.session_viewer import SessionViewer, AnalysisWindow
-from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track, get_event_track, list_events
+from datahawk.storage import get_session_file_path, get_session_track_name, get_session_source_type, get_session_video_info, load_track, save_track, get_event_track, list_events, create_event
+
+_NEW_EVENT = "➕ Add new event..."
 
 
 class _EventSelector(QWidget):
-    """Dropdown of events with track pre-fill on change."""
+    """Dropdown of events with 'Add new' option + track pre-fill on change."""
     changed = Signal()
 
     def __init__(self, track_selector, initial_event_id: str = "", parent=None):
         super().__init__(parent)
         self._track_selector = track_selector
         self._events = list_events()
-        layout = QHBoxLayout(self)
+
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        from PySide6.QtWidgets import QLabel
-        layout.addWidget(QLabel("Event:"))
+
+        from PySide6.QtWidgets import QLabel, QDateEdit
+        from PySide6.QtCore import QDate
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Event:"))
         self._combo = QComboBox()
+        self._combo.addItem("")  # blank placeholder
         for e in self._events:
             self._combo.addItem(e["name"], e["id"])
+        self._combo.addItem(_NEW_EVENT)
         # Pre-select
         for i, e in enumerate(self._events):
             if e["id"] == initial_event_id:
-                self._combo.setCurrentIndex(i)
+                self._combo.setCurrentIndex(i + 1)  # +1 for blank placeholder
                 break
-        self._combo.currentIndexChanged.connect(self._on_changed)
-        layout.addWidget(self._combo)
+        self._combo.currentTextChanged.connect(self._on_combo_changed)
+        row.addWidget(self._combo)
+        layout.addLayout(row)
+
+        # New event inputs (hidden by default)
+        self._new_row = QWidget()
+        new_layout = QHBoxLayout(self._new_row)
+        new_layout.setContentsMargins(0, 0, 0, 0)
+        self._name_input = QLineEdit()
+        self._name_input.setPlaceholderText("Event name")
+        self._name_input.textChanged.connect(lambda _: self.changed.emit())
+        new_layout.addWidget(self._name_input)
+        self._date_edit = QDateEdit(QDate.currentDate())
+        self._date_edit.setCalendarPopup(True)
+        self._date_edit.setDisplayFormat("yyyy-MM-dd")
+        new_layout.addWidget(self._date_edit)
+        self._new_row.setVisible(False)
+        layout.addWidget(self._new_row)
+
         # Initial track pre-fill
         self._update_track_prefill()
 
-    def _on_changed(self, _idx):
+    def _on_combo_changed(self, text: str):
+        self._new_row.setVisible(text == _NEW_EVENT)
         self._update_track_prefill()
         self.changed.emit()
 
@@ -52,8 +79,24 @@ class _EventSelector(QWidget):
                 self._track_selector.set_track(track)
 
     @property
+    def is_new_event(self) -> bool:
+        return self._combo.currentText() == _NEW_EVENT
+
+    @property
     def event_id(self) -> str:
+        if self.is_new_event:
+            return ""
         return self._combo.currentData() or ""
+
+    def get_or_create_event_id(self) -> str:
+        """Return existing event_id, or create new event and return its id."""
+        if self.is_new_event:
+            name = self._name_input.text().strip()
+            if not name:
+                return ""
+            date = self._date_edit.date().toString("yyyy-MM-dd")
+            return create_event(name, date)
+        return self.event_id
 
 
 class _GoProDialog(QDialog):
@@ -114,7 +157,7 @@ class MainWindow(QMainWindow):
             return
         driver = dialog.driver_selector.driver_name or "Unknown"
         track_name = dialog.track_selector.track_name
-        event_id = dialog.event_selector.event_id
+        event_id = dialog.event_selector.get_or_create_event_id()
         if not track_name:
             QMessageBox.warning(self, "Error", "Track name cannot be empty.")
             return

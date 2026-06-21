@@ -3,7 +3,7 @@
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter, QInputDialog,
+    QHeaderView, QMenu, QMessageBox, QPushButton, QSplitter,
 )
 
 from datahawk.storage import (
@@ -168,14 +168,24 @@ class SessionBrowser(QWidget):
                 self.refresh()
 
     def _on_add_event(self):
-        from datetime import date
-        name, ok = QInputDialog.getText(self, "New Event", "Event name:")
-        if ok and name.strip():
-            create_event(name.strip(), date.today().isoformat())
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QLineEdit, QDateEdit
+        from PySide6.QtCore import QDate
+        dlg = QDialog(self)
+        dlg.setWindowTitle("New Event")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel("Name:"))
+        name_input = QLineEdit()
+        layout.addWidget(name_input)
+        layout.addWidget(QLabel("Date:"))
+        date_edit = QDateEdit(QDate.currentDate())
+        date_edit.setCalendarPopup(True)
+        date_edit.setDisplayFormat("yyyy-MM-dd")
+        layout.addWidget(date_edit)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        if dlg.exec() and name_input.text().strip():
+            eid = create_event(name_input.text().strip(), date_edit.date().toString("yyyy-MM-dd"))
+            self._selected_event_id = eid
             self.refresh()
-            # Select the new event (it'll be first by date)
-            for i, e in enumerate(self._events):
-                if e["name"] == name.strip():
-                    self._event_table.selectRow(i)
-                    self._select_event(i)
-                    break
