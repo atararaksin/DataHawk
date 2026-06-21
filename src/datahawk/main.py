@@ -247,6 +247,10 @@ class MainWindow(QMainWindow):
 
         # Parse based on source type
         source_type = get_session_source_type(session_id)
+        from datahawk.storage import _get_db
+        _db = _get_db()
+        _driver = (_db.execute("SELECT driver FROM sessions WHERE id=?", (session_id,)).fetchone() or {"driver": ""})["driver"]
+        _db.close()
         if source_type in ("GoPro", "SmartyCam"):
             from datahawk.storage import deserialize_source_session
             parsed = deserialize_source_session(path.read_bytes())
@@ -261,7 +265,7 @@ class MainWindow(QMainWindow):
 
         session = build_session(parsed, track)
         window = self._get_or_create_analysis_window(track_name)
-        label = f"{session.date} {session.start_time}"
+        label = f"{_driver} - {session.date} {session.start_time} ({source_type})"
 
         # Load persisted video info
         video_path_str, video_offset = get_session_video_info(session_id)
